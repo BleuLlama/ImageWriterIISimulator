@@ -81,6 +81,8 @@ Which determines my general schedule:
 * July 14 (eve) - Shoot and upload a video showing the dev setup
 * July 15-July 22 - Primary Software development and testing
 * July 22 (eve) - Shoot and upload the video to youtube
+* July 23-24 - KansasFest 2021
+* July 25- - Additional dev work and polish.  ;)
 
 ## Before KansasFest HackFest 2021
 
