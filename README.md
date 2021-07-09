@@ -67,17 +67,15 @@ These are nice things to polish up the output... or something.
 # Timeline of Development
 
 Here's the rough outline of stuff I have planned and when I'm gonna do it.
-This is made to be in accordance with the KFest 2020 Hackfest rules, as 
-the 2021 rules are not out yet.  ;)
 
-Assumed timeline for Hackfest 2021 is:
+Timeline for Hackfest 2021 is:
 
 * Contest starts Friday, July 16, 8am CDT
 * Contest ends Thursday July 22, 5pm CDT
 
 Which determines my general schedule:
 
-* Now through July 14 - Prep work, Design, Research, Wiring
+* Now through July 14 - Prep work, Design, Research, Cabling
 * July 14 (eve) - Shoot and upload a video showing the dev setup
 * July 15-July 22 - Primary Software development and testing
 * July 22 (eve) - Shoot and upload the video to youtube
