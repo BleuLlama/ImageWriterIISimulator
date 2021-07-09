@@ -56,13 +56,13 @@ These are "sure would be nifty" upgrades.
 * Use extracted or similar bitmap fonts to render the text 
 
 
-## Definitely Not Happening Goals
+## Probably Not Happening Goals
 
 These are nice things to polish up the output... or something.
 
 * Paper simulation
 * Dot-matrix ink simulation 
-
+* 
 
 # Timeline of Development
 
@@ -97,6 +97,7 @@ This section of this document will be populated as I work on it.
 
 * Document and confirm cabling to go from my Apple IIc to my dev machine
 * Document and confirm cabling to go from a 68k Mac to my dev machine
+* Look for (or create) a STL of an ImageWriter II to shove a Raspberry Pi into, because it'd be neat.
 
 
 # Video presentation Setup
