@@ -75,9 +75,9 @@ Timeline for Hackfest 2021 is:
 
 Which determines my general schedule:
 
-* Now through July 14 - Prep work, Design, Research, Cabling
-* July 14 (eve) - Shoot and upload a video showing the dev setup
-* July 15-July 22 - Primary Software development and testing
+* Now through July 15 - Prep work, Design, Research, Cabling
+* July 15 (eve) - Shoot and upload a video showing the dev setup
+* July 16-July 22 - Primary Software development and testing
 * July 22 (eve) - Shoot and upload the video to youtube
 * July 23-24 - KansasFest 2021
 * July 25- - Additional dev work and polish.  ;)
