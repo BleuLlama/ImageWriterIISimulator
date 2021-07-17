@@ -1,4 +1,4 @@
-# ImageWriterIISimulator
+#ImageWriterIISimulator
 A serial-reading simulation of an Apple ImageWriterII printer.
 
 This project was created as an entry for
@@ -10,6 +10,7 @@ The project will be developed in accordance with the
 
 This document is a live document, so some aspects in it may change over
 time before, during and after Hackfest 2021.
+
 
 # Goals / Test Cases
 
@@ -54,6 +55,7 @@ These are "sure would be nifty" upgrades.
 * Web interface is run within the software package itself, on a predefined port so as to not compete with existing services
 
 * Use extracted or similar bitmap fonts to render the text 
+	For this, existing TTF Imagewriter and MouseFont fonts will be used
 
 
 ## Definitely Not Happening Goals
@@ -86,27 +88,45 @@ Which determines my general schedule:
 
 This section of this document will be populated as I work on it.
 
-# Design and Research
+### Design and Research
 
 * Basic sketches of the system and how it works... all of the Software Engineering-ey stuff to get my brain in order.
 * Figure out what languages to use for each component. (probably python)
 * Determine directory structure, etc.
 * Set up git repository (this)
 
-# Hardware Confirmation For Testing
+### Hardware Confirmation For Testing
 
 * Document and confirm cabling to go from my Apple IIc to my dev machine
 * Document and confirm cabling to go from a 68k Mac to my dev machine
 
 
-# Video presentation Setup
+### Software for testing
+
+* word processor(s) on Apple
+* Print Shop on Apple
+
+### Video presentation Setup
 
 * Make sure I have the ability to produce a nice video demonstrating the project
-* perhaps make a video showing my test and development setup before July 15
+* perhaps make a video showing my test and development setup before July 16
 
 ## During KansasFest HackFest 2021
 
-# Primary Software
+### Primary Software
 
 All of the parts from "listening on a serial port" through to the local
 file generation will be generated during the Hackfest per the rules.
+
+### Preliminary plan of attack
+
+This section will roughly cover the individual specific tasks I'll need to
+tackle to make this happen.  I'll be using Python3 and the PySerial library.
+
+- Create a python3 program that will read from the serial port
+- extend it to save the captured data to a file (for testing without hardware)
+- Write Apple //c basic program that opens 9600 8N1 and outputs some text
+- Confirm it works and stores the data properly.
+- Switch it to run at 9600 7N2 (iirc), and confirm it works per IW2 defaults
+- When it does, print from Print Shop, capture to file
+- 

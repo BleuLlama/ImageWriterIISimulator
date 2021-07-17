@@ -9,5 +9,9 @@ This book has lots of useful info in its Appendices:
 * Appendix B (pg 79) "ASCII Codes" has the MouseText to ASCII conversion chart
 * Appendix C (pg 83) "ImageWriter II Printer and Interface Specifications" has serial protocol config and wiring pinouts
 
+Also:
+
+* Program on page 77 to test text formattings
+
 
 * [ImageWriter II Technical Reference Manual](https://www.apple.asimov.net/documentation/hardware/printers/Apple%20ImageWriter%20II%20Technical%20Reference%20Manual.pdf)

@@ -15,6 +15,11 @@ especially when the Apple pin numbers differ from the embossed/standard
 numbering.
 
 
+* Text mode: 9600 Baud, 8 bits, no parity, 1 stop bit
+* Graphics mode: "8 or 7 bits"
+* Binary mode: "8 bits"
+
+
 
 # PC-standard 9 pin Serial
 
