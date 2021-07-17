@@ -1,31 +1,12 @@
 #!/usr/bin/env python
 #
-# Redirect data from a TCP/IP connection to a serial port and vice versa.
-#
-# (C) 2002-2020 Chris Liechti <cliechti@gmx.net>
-#
-# SPDX-License-Identifier:    BSD-3-Clause
+# Dump out contents to screen
+# optionally kill bit 8
 
 import sys
-import socket
 import serial
 import serial.threaded
 import time
-
-
-class SerialToNet(serial.threaded.Protocol):
-    """serial->socket"""
-
-    def __init__(self):
-        self.socket = None
-
-    def __call__(self):
-        return self
-
-    def data_received(self, data):
-        sys.stdout.write(data)
-        if self.socket is not None:
-            self.socket.sendall(data)
 
 
 class SerialToScreen(serial.threaded.Protocol):
@@ -164,21 +145,6 @@ This is not meant to be a final product. just a testbed.
         help='set initial DTR line state (possible values: 0, 1)',
         default=None)
 
-    group = parser.add_argument_group('network settings')
-
-    exclusive_group = group.add_mutually_exclusive_group()
-
-    exclusive_group.add_argument(
-        '-P', '--localport',
-        type=int,
-        help='local TCP port',
-        default=7777)
-
-    exclusive_group.add_argument(
-        '-c', '--client',
-        metavar='HOST:PORT',
-        help='make the connection as a client, instead of running a server',
-        default=False)
 
     args = parser.parse_args()
 
@@ -199,7 +165,7 @@ This is not meant to be a final product. just a testbed.
 
     if not args.quiet:
         sys.stderr.write(
-            '--- TCP/IP to Serial redirect on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
+            '--- Serial Snoop on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
             '--- type Ctrl-C / BREAK to quit\n'.format(p=ser))
 
     try:
@@ -232,75 +198,6 @@ This is not meant to be a final product. just a testbed.
 
     except KeyboardInterrupt:
         pass
-
-    if False:
-        if not args.client:
-            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            srv.bind(('', args.localport))
-            srv.listen(1)
-        try:
-            intentional_exit = False
-            while True:
-                if args.client:
-                    host, port = args.client.split(':')
-                    sys.stderr.write("Opening connection to {}:{}...\n".format(host, port))
-                    client_socket = socket.socket()
-                    try:
-                        client_socket.connect((host, int(port)))
-                    except socket.error as msg:
-                        sys.stderr.write('WARNING: {}\n'.format(msg))
-                        time.sleep(5)  # intentional delay on reconnection as client
-                        continue
-                    sys.stderr.write('Connected\n')
-                    client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    #~ client_socket.settimeout(5)
-                else:
-                    sys.stderr.write('Waiting for connection on {}...\n'.format(args.localport))
-                    client_socket, addr = srv.accept()
-                    sys.stderr.write('Connected by {}\n'.format(addr))
-                    # More quickly detect bad clients who quit without closing the
-                    # connection: After 1 second of idle, start sending TCP keep-alive
-                    # packets every 1 second. If 3 consecutive keep-alive packets
-                    # fail, assume the client is gone and close the connection.
-                    try:
-                        client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 1)
-                        client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 1)
-                        client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
-                        client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    except AttributeError:
-                        pass # XXX not available on windows
-                    client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                try:
-                    ser_to_net.socket = client_socket
-                    # enter network <-> serial loop
-                    while True:
-                        try:
-                            data = client_socket.recv(1024)
-                            if not data:
-                                break
-                            ser.write(data)                 # get a bunch of bytes and send them
-                        except socket.error as msg:
-                            if args.develop:
-                                raise
-                            sys.stderr.write('ERROR: {}\n'.format(msg))
-                            # probably got disconnected
-                            break
-                except KeyboardInterrupt:
-                    intentional_exit = True
-                    raise
-                except socket.error as msg:
-                    if args.develop:
-                        raise
-                    sys.stderr.write('ERROR: {}\n'.format(msg))
-                finally:
-                    ser_to_net.socket = None
-                    sys.stderr.write('Disconnected\n')
-                    client_socket.close()
-                    if args.client and not intentional_exit:
-                        time.sleep(5)  # intentional delay on reconnection as client
-        except KeyboardInterrupt:
-            pass
 
     sys.stderr.write('\n--- exit ---\n')
     serial_worker.stop()
