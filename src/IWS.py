@@ -32,6 +32,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         self.rbuf = ""
 
         self.file = None
+        self.fSize = 0
 
         # esc - escaped 
         self.escRemaining = 0        # number of chars left in escape sequence
@@ -164,19 +165,25 @@ class LlamaWriterSim( serial.threaded.Protocol ):
             return; # nothing to do
 
         self.file.close()
-        print( "{}: File closed.".format( self.currentFilename ))
+        print( "{}: Ended.  {} bytes stored.".format( self.currentFilename, self.fSize ))
 
-        # if a filename was passed in, rename the saved file 
-        if not renameTo == None and len( renameTo ) > 0:
-            nfn = "Printouts/{}".format( renameTo )
-            os.rename( self.currentFilename, nfn )
-            print( "--> renamed to {}".format( nfn ))
+        if self.fSize == 0:
+            print( "Removing empty file." )
+            os.remove( self.currentFilename )
+
+        else:
+
+            # if a filename was passed in, rename the saved file 
+            if not renameTo == None and len( renameTo ) > 0:
+                nfn = "Printouts/{}".format( renameTo )
+                os.rename( self.currentFilename, nfn )
+                print( "--> renamed to {}".format( nfn ))
 
     def OpenFile( self ):
         """ open a new file for logging """
         self.currentFilename = self.GetNewFilename()
 
-        print( "{}: New page".format( self.currentFilename ))
+        print("\n{}: Starting new page".format( self.currentFilename ))
         self.file = open( self.currentFilename, "wb" ) 
 
 
@@ -254,7 +261,8 @@ class LlamaWriterSim( serial.threaded.Protocol ):
                 # now determine how big the thing is.
             else:
                 # it's boring content. just output it.
-                sys.stdout.write( "{}\n".format( ch ) ) 
+                sys.stdout.write( "." ) #.format( chr(ch) ) ) 
+                sys.stdout.flush()
 
 
     def data_received(self, data):
@@ -266,6 +274,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         # and log it to the output file
         if not self.file == None:
             self.file.write( data )
+            self.fSize += 1
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def RequestPortOrDirectory():
