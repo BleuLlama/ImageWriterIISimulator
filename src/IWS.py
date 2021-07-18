@@ -1,20 +1,37 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Handle control codes. (test)
+# LlamaWriterSim - An ImageWriter II simulator of sorts
+#
+#   (c)2021 Scott Lawrence / yorgle@gmail.com
+#
+
+
+VERSION = '0.01'
+VERS_DATE = '2021-07-18'
+
+# v0.01 - 2021-07-18 - indev version
+
 
 import sys
 import serial
 import serial.threaded
 import time
+import os
+
+from serial.tools.list_ports import comports
+from serial.tools import hexlify_codec
 
 
-class SerialToScreen(serial.threaded.Protocol):
-    """serial->display"""
+
+class LlamaWriterSim( serial.threaded.Protocol ):
+    """serial/file to file/outputs/etc"""
 
     def __init__(self):
         self.count = 0
         self.tick = 0
         self.rbuf = ""
+
+        self.file = None
 
         # esc - escaped 
         self.escRemaining = 0        # number of chars left in escape sequence
@@ -27,6 +44,7 @@ class SerialToScreen(serial.threaded.Protocol):
             [ 1, [ # these have no parameters
                 0x6d,   # Select correspondence font
                 0x4d,   # select NLQ font
+
                 0x26,   # mousetext remap
                 0x24,   # ascii
 
@@ -34,6 +52,7 @@ class SerialToScreen(serial.threaded.Protocol):
                 0x2b,
                 0x49,
                 0x27,
+                0x2a,
                 0x24,
 
                 0x6e,   # character pitch
@@ -73,25 +92,28 @@ class SerialToScreen(serial.threaded.Protocol):
                 0x6f,   # paper out sensor on (default)
 
                 0x63,   # reset to defaults
+
                 0x3f,   # send ident string
                 ]
             ],
             [ 2, [ # these have one additional parameter
+                0x73,   # dot spacings
                 0x61,   # select font
                 0x6c,   # CR/LF toggles
                 0x4b,   # Color '0..6': K, Y, M, C, orn(YM), grn(YC), pur(MC)
                 ]
             ],
             [ 3, [ # these have two additional parameters
-                0x44,   # keyboard, bit select, dipswitches, perf skip
-                0x5a,   # more of the same
-                0x73,   # dot spacings
+                0x44,   # clear dips - keyboard, bit select, perf skip
+                0x5a,   # set dipswitches 
+
                 0x54,   # distance between lines NN/144 inch
                 0x67,   # print line of graphics NNNx8 bytes
                 ]
             ],
             [ 4, [ # these hsve 3 additional parameters
                 0x4c,   # set left margin  000
+                0x75,   # set one tab stop at HHH
                 ]
             ],
             [ 5, [ # these hsve 4 additional parameters
@@ -99,10 +121,10 @@ class SerialToScreen(serial.threaded.Protocol):
                 0x46,   # place print head NNNN dot cols from left margin
                 0x47,   # print line of graphics NNNN
                 0x53,   # same as 0x47
+                0x52,   # HHHC  repeat charactr c HHH times 000-999
                 ]
             ],
             [ 6, [ # these hsve 5 additional parameters
-                0x75,   # set one tab stop
                 ]
             ],
             [ 7, [ # these hsve 6 additional parameters
@@ -121,13 +143,66 @@ class SerialToScreen(serial.threaded.Protocol):
     def __call__(self):
         return self
 
-    def TimeTick( self ):
+    def GetNewFilename( self ):
+        """ determine the next filename to use """
+        i = 0
+
+        # get the integer based on sequential digits
+        #if not os.path.isdir( "Printouts" ):
+        #    os.makedirs( "Printouts" )
+        # get the integer based on current time
+        i = time.time()
+
+        while os.path.exists( "Printouts/%04d.raw" % i ):
+            i += 1
+
+        return "Printouts/%04d.raw" % i;
+
+    def CloseFile( self, renameTo = None ):
+        """ close the open file, if any """
+        if self.file == None:
+            return; # nothing to do
+
+        self.file.close()
+        print( "{}: File closed.".format( self.currentFilename ))
+
+        # if a filename was passed in, rename the saved file 
+        if not renameTo == None and len( renameTo ) > 0:
+            nfn = "Printouts/{}".format( renameTo )
+            os.rename( self.currentFilename, nfn )
+            print( "--> renamed to {}".format( nfn ))
+
+    def OpenFile( self ):
+        """ open a new file for logging """
+        self.currentFilename = self.GetNewFilename()
+
+        print( "{}: New page".format( self.currentFilename ))
+        self.file = open( self.currentFilename, "wb" ) 
+
+
+
+    def TearOffPage( self, renameFilename = None ):
+        """ tear off the existing page, and start a new one """
+        self.CloseFile( renameFilename );
+        self.OpenFile();
+
         if self.tick == 0:
-            ser_to_screen.FlushLine()
-            ser_to_screen.FlushLine()
+            self.FlushLine()
+            self.FlushLine()
         self.tick = 1
 
+
+    def TimeTick( self ):
+        """ time interval update """
+        if self.tick == 0:
+            self.FlushLine()
+            self.FlushLine()
+        self.tick = 1
+
+
+
     def FlushLine( self ):
+        """ flush out the hex line """
         # fill in missing space..
         for i in range(  self.count, 16 ):
             if i == 8:
@@ -141,21 +216,24 @@ class SerialToScreen(serial.threaded.Protocol):
         self.count = 0
 
     def Hex( self, ch ):
-        return format(ord( ch ), "x")  # for '43'
+        return format( ch, "x")  # for '43'
 
 
     def HandleEscapeSequence( self, seq ):
+        """ the magic """
         sys.stdout.write( "\nESC SEQ: {} {} {} {}\n".format( 
             self.Hex( seq[0] ), self.Hex( seq[1] ), 
             self.Hex( seq[2] ), self.Hex( seq[3] ), ))
 
 
-    def HandleChar( self, ch ):
+
+    def HandleByte( self, ch ):
+        """ primary valve for the stream of bytes """
         self.tick = 0;
+        # python3 - ch is of type 'int'
 
         # filter out high bit
         #ch = chr( ord( ch ) & 0x7f)
-
 
         if self.escRemaining > 0:
             self.escRemaining = self.escRemaining - 1
@@ -165,8 +243,7 @@ class SerialToScreen(serial.threaded.Protocol):
             if self.escRemaining == 0:
                 self.HandleEscapeSequence( self.escSequence )
         else:
-            oc = ord(ch)
-            if oc == 0x27: 
+            if ch == 0x1b: 
                 sys.stdout.write( "[ESC]" )
                 # it's the start of an escape sequence
                 # prep for accumulating it...
@@ -177,19 +254,63 @@ class SerialToScreen(serial.threaded.Protocol):
                 # now determine how big the thing is.
             else:
                 # it's boring content. just output it.
-                sys.stdout.write( ch )
+                sys.stdout.write( "{}\n".format( ch ) ) 
 
 
     def data_received(self, data):
-        # we got a string of bytes, or perhaps of just one byte
-        # so we need to handle each character individually
-        for idx in range(0, len(data)):
-            self.HandleChar( data[idx] )
+        """ input from the serial stream """
+        # send it to our handler
+        for ch in data:
+            self.HandleByte( ch )
+
+        # and log it to the output file
+        if not self.file == None:
+            self.file.write( data )
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def RequestPortOrDirectory():
+    """\
+    Show a list of ports and ask the user for a choice. To make selection
+    easier on systems with long device names, also allow the input of an
+    index.
+    """
+    sys.stderr.write('\n--- Source selection options:\n')
+    ports = []
+
+    sys.stderr.write('--- {:2}: {:20} {!r} (default)\n'.format(0, 'Printouts/', 'printout directory'))
+
+    for n, (port, desc, hwid) in enumerate(sorted(comports()), 1):
+        sys.stderr.write('--- {:2}: {:20} {!r}\n'.format(n, port, desc))
+        ports.append(port)
+
+    while True:
+        port = input('--- Enter port index or full name or directory: ')
+
+        if port == '' or int( port ) == 0:
+            return 'Printouts/'
+
+        try:
+            index = int(port) - 1
+            if not 0 <= index < len(ports):
+                sys.stderr.write('--- Invalid index!\n')
+                continue
+        except ValueError:
+            pass
+        else:
+            port = ports[index]
+
+        return port
 
 
+def splash():
+    print( 'LlamaWriter2 - An ImageWriterII simulator of sorts.' )
+    print( '    v{} {}'.format( VERSION, VERS_DATE ))
+    print( '   (c) Scott Lawrence - yorgle@gmail.com' )
 
 if __name__ == '__main__':  # noqa
     import argparse
+
+    splash()
 
     parser = argparse.ArgumentParser(
         description='Handle IW2 escape sequences.',
@@ -199,7 +320,9 @@ First attempt at making this thing do the thing.
 
     parser.add_argument(
         'SERIALPORT',
-        help="serial port name")
+        nargs='?',
+        help="serial port name",
+        default=False)
 
     parser.add_argument(
         'BAUDRATE',
@@ -268,50 +391,100 @@ First attempt at making this thing do the thing.
         default=None)
 
 
+
     args = parser.parse_args()
 
-    # connect to serial port
-    ser = serial.serial_for_url(args.SERIALPORT, do_not_open=True)
-    ser.baudrate = args.BAUDRATE
-    ser.bytesize = args.bytesize
-    ser.parity = args.parity
-    ser.stopbits = args.stopbits
-    ser.rtscts = args.rtscts
-    ser.xonxoff = args.xonxoff
+    if args.SERIALPORT is False:
+        args.SERIALPORT = RequestPortOrDirectory()
 
-    if args.rts is not None:
-        ser.rts = args.rts
+    runmode = None
+    serial_worker = None
 
-    if args.dtr is not None:
-        ser.dtr = args.dtr
+    if os.path.isdir( args.SERIALPORT ):
+        runmode = 'offline'
 
-    if not args.quiet:
-        sys.stderr.write(
-            '--- Serial Snoop on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
-            '--- type Ctrl-C / BREAK to quit\n'.format(p=ser))
+        if not args.quiet:
+            sys.stderr.write( 
+                '--- LlamaWriter2 in offline mode using "Printouts/" directory\n'
+                '--- Ctrl-C / BREAK / [q] to quit, [?] for help\n' 
+                )
 
-    try:
-        ser.open()
-    except serial.SerialException as e:
-        sys.stderr.write('Could not open serial port {}: {}\n'.format(ser.name, e))
-        sys.exit(1)
+    else:
+        runmode = 'serial'
 
-    ser_to_screen = SerialToScreen();
-    serial_worker = serial.threaded.ReaderThread(ser, ser_to_screen)
+        # connect to serial port
+        ser = serial.serial_for_url(args.SERIALPORT, do_not_open=True)
 
-    # ser_to_net = SerialToNet()
-    # serial_worker = serial.threaded.ReaderThread(ser, ser_to_net)
-    serial_worker.start()
+        ser.baudrate = args.BAUDRATE
+        ser.bytesize = args.bytesize
+        ser.parity = args.parity
+        ser.stopbits = args.stopbits
+        ser.rtscts = args.rtscts
+        ser.xonxoff = args.xonxoff
 
+        if args.rts is not None:
+            ser.rts = args.rts
+
+        if args.dtr is not None:
+            ser.dtr = args.dtr
+
+        if not args.quiet:
+            sys.stderr.write(
+                '--- LlamaWriter2 on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
+                '--- Ctrl-C / BREAK / [q] to quit, [?] for help\n'.format(p=ser))
+
+        try:
+            ser.open()
+        except serial.SerialException as e:
+            sys.stderr.write('Could not open serial port {}: {}\n'.format(ser.name, e))
+            sys.exit(1)
+
+    # both need the handler.
+    llamawriter_sim = LlamaWriterSim();
+
+    # if we're in serial mode, connect this object to the serial port.
+    if runmode == 'serial':
+        serial_worker = serial.threaded.ReaderThread(ser, llamawriter_sim)
+        # ser_to_net = SerialToNet()
+        # serial_worker = serial.threaded.ReaderThread(ser, ser_to_net)
+        serial_worker.start()
+
+    # the main run loop..
     try:
         intentional_exit = False
-        sys.stdout.write( "Starting serial loop" )
+        print( "Ready." )
 
+        # sit in this loop until we need to quit
         while True:
             try:
-                time.sleep(4)
-                ser_to_screen.TimeTick()
+                cmd = input( ">: " ) # does this make you feel lost?
+                arg = ''
 
+                if len( cmd ) > 1:
+                    arg = cmd[1:].strip()
+
+                if cmd == "": # do nothing
+                    print( "" ) 
+
+                elif cmd[0] == '?': # help
+                    print( "Commands: " )
+                    print( "   q        quit" );
+                    print( "   r        reprint a Printouts/X.raw file" );
+                    print( "   t        tear off page" );
+                    print( "   t<NAME>   ... and save it as Printouts/<NAME>" );
+
+                elif cmd[0]  == "t": # tear off page
+                    llamawriter_sim.TearOffPage( arg )
+
+                elif cmd[0] == "q": # quit
+                    intentional_exit = True
+                    raise KeyboardInterrupt
+
+                else: 
+                    print( "{}: Unknown command.".format( cmd ))
+
+
+                #time.sleep(4)
 
             except KeyboardInterrupt:
                     intentional_exit = True
@@ -320,5 +493,12 @@ First attempt at making this thing do the thing.
     except KeyboardInterrupt:
         pass
 
+    # make sure any files are closed
+    llamawriter_sim.CloseFile( None )
+
+    # shut down the serial worker.
+    if runmode == 'serial':
+        serial_worker.stop()
+
+
     sys.stderr.write('\n--- exit ---\n')
-    serial_worker.stop()
