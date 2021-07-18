@@ -14,10 +14,17 @@ class SerialToScreen(serial.threaded.Protocol):
 
     def __init__(self):
         self.count = 0
+        self.tick = 0
         self.rbuf = ""
 
     def __call__(self):
         return self
+
+    def TimeTick( self ):
+        if self.tick == 0:
+            ser_to_screen.FlushLine()
+            ser_to_screen.FlushLine()
+        self.tick = 1
 
     def FlushLine( self ):
         # fill in missing space..
@@ -33,9 +40,10 @@ class SerialToScreen(serial.threaded.Protocol):
         self.count = 0
 
     def HandleChar( self, ch ):
+        self.tick = 0;
 
         # filter out high bit
-        ch = chr( ord( ch ) & 0x7f)
+        #ch = chr( ord( ch ) & 0x7f)
 
 
         #h = hex( ord( ch ))        # for '0x43;
@@ -47,7 +55,7 @@ class SerialToScreen(serial.threaded.Protocol):
 
         self.count = self.count +1
 
-        if ord( ch ) >= 0x20 and ord( ch ) <= 0x7f:
+        if ord( ch ) >= 0x20 and ord( ch ) < 0x7f:
             self.rbuf = self.rbuf + ch
         else: 
             self.rbuf = self.rbuf + '.'
@@ -188,8 +196,7 @@ This is not meant to be a final product. just a testbed.
         while True:
             try:
                 time.sleep(4)
-                ser_to_screen.FlushLine()
-                ser_to_screen.FlushLine()
+                ser_to_screen.TimeTick()
 
 
             except KeyboardInterrupt:
