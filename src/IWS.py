@@ -21,6 +21,8 @@ import os
 from serial.tools.list_ports import comports
 from serial.tools import hexlify_codec
 
+from os import listdir
+from os.path import isfile, join
 
 
 class LlamaWriterSim( serial.threaded.Protocol ):
@@ -33,6 +35,8 @@ class LlamaWriterSim( serial.threaded.Protocol ):
 
         self.file = None
         self.fSize = 0
+
+        self.Printouts = "Printouts/"
 
         # esc - escaped 
         self.escRemaining = 0        # number of chars left in escape sequence
@@ -197,6 +201,52 @@ class LlamaWriterSim( serial.threaded.Protocol ):
             self.FlushLine()
             self.FlushLine()
         self.tick = 1
+
+    def DirList( self, thePath, theExt ):
+        theList = []
+        i = 0
+        for f in listdir( thePath ):
+            filename, file_extension = os.path.splitext( f )
+            if file_extension == theExt:
+                theList.append( f )
+                i += 1
+
+        theList.sort()
+        return theList
+
+    def PrintList( self, theList ):
+        for i in range( len( theList )):
+            print( "    {:>2}: {}".format( i, theList[i] ))
+
+    def Reprint( self, request ):
+        theList = self.DirList( self.Printouts, ".raw" )
+
+        if( request == '' ):
+            print( "No printout selected.  Usage: r <number>" )
+            self.PrintList( theList )
+            return;
+
+        try:
+            request = int( request )
+        except ValueError:
+            print( "ERROR: {}: Bad number".format( request ))
+            pass
+            return
+
+        if( request < 0  or request >= len( theList )):
+            print( "ERROR: {}: Out of range 0..{}".format( request, len( theList )-1))
+            return
+
+        rFilename = "{}{}".format( self.Printouts, theList[ request ] )
+        print( "Reprinting {}...".format( rFilename ))
+
+        file = open( rFilename, "rb" )
+        fbyte = file.read(1)
+        while fbyte:
+            self.HandleByte( int( ord( fbyte )))
+            fbyte = file.read(1)
+        file.close()
+        print( "\nDone reprinting!" )
 
 
     def TimeTick( self ):
@@ -484,6 +534,9 @@ First attempt at making this thing do the thing.
 
                 elif cmd[0]  == "t": # tear off page
                     llamawriter_sim.TearOffPage( arg )
+
+                elif cmd[0]  == "r": # reprint a file
+                    llamawriter_sim.Reprint( arg )
 
                 elif cmd[0] == "q": # quit
                     intentional_exit = True
