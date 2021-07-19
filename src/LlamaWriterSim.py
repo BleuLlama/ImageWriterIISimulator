@@ -6,9 +6,10 @@
 #
 
 
-VERSION = '0.01'
-VERS_DATE = '2021-07-18'
+VERSION = '0.02'
+VERS_DATE = '2021-07-19'
 
+# v0.02 - 2021-07-19 - Added reprinting
 # v0.01 - 2021-07-18 - indev version
 
 
@@ -362,9 +363,9 @@ def RequestPortOrDirectory():
 
 
 def splash():
-    print( 'LlamaWriter2 - An ImageWriterII simulator of sorts.' )
-    print( '    v{} {}'.format( VERSION, VERS_DATE ))
-    print( '   (c) Scott Lawrence - yorgle@gmail.com' )
+    print( '## LlamaWriterSim - An ImageWriterII simulator of sorts.' )
+    print( '##    v{} {}'.format( VERSION, VERS_DATE ))
+    print( '##   (c) Scott Lawrence - yorgle@gmail.com' )
 
 if __name__ == '__main__':  # noqa
     import argparse
@@ -464,8 +465,9 @@ First attempt at making this thing do the thing.
 
         if not args.quiet:
             sys.stderr.write( 
-                '--- LlamaWriter2 in offline mode using "Printouts/" directory\n'
-                '--- Ctrl-C / BREAK / [q] to quit, [?] for help\n' 
+                '\n'
+                ' >>  Operating in offline mode using "Printouts/" directory\n'
+                ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n' 
                 )
 
     else:
@@ -489,8 +491,8 @@ First attempt at making this thing do the thing.
 
         if not args.quiet:
             sys.stderr.write(
-                '--- LlamaWriter2 on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
-                '--- Ctrl-C / BREAK / [q] to quit, [?] for help\n'.format(p=ser))
+                ' >>  Operating on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
+                ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n'.format(p=ser))
 
         try:
             ser.open()
@@ -511,7 +513,7 @@ First attempt at making this thing do the thing.
     # the main run loop..
     try:
         intentional_exit = False
-        print( "Ready." )
+        print( "\nReady." )
 
         # sit in this loop until we need to quit
         while True:
@@ -527,10 +529,11 @@ First attempt at making this thing do the thing.
 
                 elif cmd[0] == '?': # help
                     print( "Commands: " )
-                    print( "   q        quit" );
-                    print( "   r        reprint a Printouts/X.raw file" );
-                    print( "   t        tear off page" );
-                    print( "   t<NAME>   ... and save it as Printouts/<NAME>" );
+                    print( "   q          Quit" );
+                    print( "   r          List available RAW files to reprint" );
+                    print( "   r<NUMBER>  Reprint the specified captured printout" );
+                    print( "   t          tear off page, saving it based on timestamp" );
+                    print( "   t<NAME>   ... or save it as Printouts/<NAME>" );
 
                 elif cmd[0]  == "t": # tear off page
                     llamawriter_sim.TearOffPage( arg )
