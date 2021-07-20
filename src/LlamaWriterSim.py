@@ -6,9 +6,10 @@
 #
 
 
-VERSION = '0.02'
+VERSION = '0.03'
 VERS_DATE = '2021-07-19'
 
+# v0.03 - 2021-07-19 - Changed how logging reprints works
 # v0.02 - 2021-07-19 - Added reprinting
 # v0.01 - 2021-07-18 - indev version
 
@@ -233,7 +234,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         for i in range( len( theList )):
             print( "    {:>2}: {}".format( i, theList[i] ))
 
-    def Reprint( self, request ):
+    def Reprint( self, request, logging ):
         theList = self.DirList( self.Printouts, ".raw" )
 
         if( request == '' ):
@@ -258,7 +259,10 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         file = open( rFilename, "rb" )
         fbyte = file.read(1)
         while fbyte:
-            self.HandleByte( int( ord( fbyte )))
+            if logging:
+                self.data_received( bytes( fbyte ))     # yes logging
+            else :
+                self.HandleByte( int( ord( fbyte )))   # no logging
             fbyte = file.read(1)
         file.close()
         print( "\n--- Done reprinting! ---" )
@@ -733,14 +737,18 @@ First attempt at making this thing do the thing.
                     print( "   q          Quit" );
                     print( "   r          List available RAW files to reprint" );
                     print( "   r<NUMBER>  Reprint the specified captured printout" );
+                    print( "   R<NUMBER>  Reprint with RAW logging" );
                     print( "   t          tear off page, saving it based on timestamp" );
                     print( "   t<NAME>   ... or save it as Printouts/<NAME>" );
 
-                elif cmd[0]  == "t": # tear off page
+                elif cmd[0] == "t": # tear off page
                     llamawriter_sim.TearOffPage( arg )
 
-                elif cmd[0]  == "r": # reprint a file
-                    llamawriter_sim.Reprint( arg )
+                elif cmd[0] == "r": # reprint a file
+                    llamawriter_sim.Reprint( arg, False )
+
+                elif cmd[0] == "R": # reprint a file
+                    llamawriter_sim.Reprint( arg, True )
 
                 elif cmd[0] == "q": # quit
                     intentional_exit = True
@@ -748,7 +756,6 @@ First attempt at making this thing do the thing.
 
                 else: 
                     print( "{}: Unknown command.".format( cmd ))
-
 
                 #time.sleep(4)
 
