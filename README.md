@@ -1,6 +1,13 @@
 #ImageWriterIISimulator / LlamaWriter
 A serial-reading simulation of an Apple ImageWriterII printer.
 
+# CURRENT STATE
+
+July 19, 2021 - This project is being currently developed RIGHT NOW!  It is 
+not functional yet.
+
+# Background...
+
 This project was created as an entry for
 [KansasFest 2021](https://www.kansasfest.org/), but also just
 because I want to be able to print banners and cards from my Apple II.
@@ -22,11 +29,11 @@ to know when to stop. ;D
 This covers the "gotta haves" of the project. Without these, I don't
 think I can consider the project a success at all.
 
-* The ability to print from Print Shop on my Apple IIc and have it go to
-a modern system as a common graphic format (BMP, PGM)
-
 * The ability to print from text applications on the IIc and have it go
 to some sort of formatted text file. (Markdown, HTML, etc)
+
+* The ability to print from Print Shop on my Apple IIc and have it go to
+a modern system as a common graphic format (BMP, PGM)
 
 
 ### Additional test cases
@@ -41,18 +48,16 @@ running System 6 or 7
 
 These are "quality of life" upgrades.
 
-* Files should be made available through a web interface
+* Printed files should be made available through a web interface
 
-* Graphic printouts should be made available in modern formats.
+* Graphic printouts should be made available as modern formats. (PNG)
 
-* Web interface should link to HTML versions of the documents
+* Web interface should link to HTML+CSS versions of the documents
 
 
 ## Tertiary Goals
 
 These are "sure would be nifty" upgrades.
-
-* Web interface is run within the software package itself, on a predefined port so as to not compete with existing services
 
 * Use extracted or similar bitmap fonts to render the text 
 	For this, existing TTF Imagewriter and MouseFont fonts will be used
@@ -64,7 +69,7 @@ These are nice things to polish up the output... or something.
 
 * Paper simulation
 * Dot-matrix ink simulation 
-* 
+
 
 # Timeline of Development
 
@@ -86,7 +91,9 @@ Which determines my general schedule:
 
 ## Before KansasFest HackFest 2021
 
-This section of this document will be populated as I work on it.
+In keeping with the rules, none of the software development was done 
+before HF21, only collecting of stuff, wiring up cables, and making sure
+that things all work:
 
 ### Design and Research
 
@@ -100,6 +107,8 @@ This section of this document will be populated as I work on it.
 * Document and confirm cabling to go from my Apple IIc to my dev machine
 * Document and confirm cabling to go from a 68k Mac to my dev machine
 * Look for (or create) a STL of an ImageWriter II to shove a Raspberry Pi into, because it'd be neat.
+
+NOTE: All three of these are complete. The IW2 model is on Thingiverse. ;D
 
 
 ### Software for testing
@@ -128,6 +137,6 @@ tackle to make this happen.  I'll be using Python3 and the PySerial library.
 - extend it to save the captured data to a file (for testing without hardware)
 - Write Apple //c basic program that opens 9600 8N1 and outputs some text
 - Confirm it works and stores the data properly.
-- Switch it to run at 9600 7N2 (iirc), and confirm it works per IW2 defaults
 - When it does, print from Print Shop, capture to file
-- 
+
+As of Jul-19, all of the above have been accomplished.
