@@ -43,7 +43,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         self.escRemaining = 0        # number of chars left in escape sequence
         # if it's 0, pass characters through...
         self.escIdx = 0
-        self.escSequence = [0,0,0,0] # escape sequence
+        self.escSequence = self.ClearEscapeSequence()
 
         # Length of escape sequences, based on the first byte; after 0x1b
         self.eSeqLen = [
@@ -149,6 +149,20 @@ class LlamaWriterSim( serial.threaded.Protocol ):
     def __call__(self):
         return self
 
+
+    def GetSeqLen( self, firstByte ):
+        """ Go through the table above, and find the matching opcode.
+            If we found it in the list, return the size byte from that
+            So even if we get an escape code we're not handling, we know
+            how big it is so we can ignore it
+        """
+        for l in self.eSeqLen:
+            for kb in l[1]:
+                if kb == firstByte:
+                    return l[0]
+
+        return 0
+
     def GetNewFilename( self ):
         """ determine the next filename to use """
         i = 0
@@ -239,7 +253,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
             return
 
         rFilename = "{}{}".format( self.Printouts, theList[ request ] )
-        print( "Reprinting {}...".format( rFilename ))
+        print( "--- Reprinting {} ---".format( rFilename ))
 
         file = open( rFilename, "rb" )
         fbyte = file.read(1)
@@ -247,7 +261,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
             self.HandleByte( int( ord( fbyte )))
             fbyte = file.read(1)
         file.close()
-        print( "\nDone reprinting!" )
+        print( "\n--- Done reprinting! ---" )
 
 
     def TimeTick( self ):
@@ -274,15 +288,191 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         self.count = 0
 
     def Hex( self, ch ):
-        return format( ch, "x")  # for '43'
+        h = format( ch, "x" )  # for '43'
+        if len( h ) == 1:
+            h = '0' + h
+        return h
+
+
+    def ClearEscapeSequence( self ):
+        return [ 0, 0, 0, 0, 0, 0 ]
+
+
+    def HandleControlCharacter( self, ch ):
+        """ try handling a control character
+        if we used it, return true
+        otherwise return false
+        """
+        if ch == 0x04:
+            print( "[EOT]" ) #End loading new characters" )
+
+        elif ch == 0x08:
+            print( "[BS]" ) # backspace
+        elif ch == 0x09:
+            print( "[TAB]" ) # tab
+
+        elif ch == 0x0a:
+            print( "[LF]" ) # feed paper one line (LF)
+        elif ch == 0x0c:
+            print( "[FF]" ) # Feed to next Top of page 
+        elif ch == 0x0d:
+            print( "[CR]" ) # Carriage Return
+
+        elif ch == 0x0e:
+            print( "[DW]" ) # Start double-width printing
+        elif ch == 0x0f:
+            print( "[SDW]" ) # Stop double-width printing
+
+        elif ch == 0x11:
+            print( "[XON]" ) # Select Printer *
+        elif ch == 0x13:
+            print( "[XOFF]" ) # Deselect Printer
+        elif ch == 0x18:
+            print( "[CAN]" ) # cancel / Erase current l ine from print buffer
+
+        else:
+            return False
+
+        return True
 
 
     def HandleEscapeSequence( self, seq ):
-        """ the magic """
-        sys.stdout.write( "\nESC SEQ: {} {} {} {}\n".format( 
-            self.Hex( seq[0] ), self.Hex( seq[1] ), 
-            self.Hex( seq[2] ), self.Hex( seq[3] ), ))
+        """ When the code gets to here, we have a completed escape sequence. """
 
+        # [0] is the base command. [1]..[5] are arguments.
+        if( seq[0] == 0x63 ):   print( "Reset Defaults" )
+        elif( seq[0] == 0x3F ):   print( "Send ID String" )
+
+        elif( seq[0] >= 0x01 and seq[0] <= 0x06 ):
+            print( "Insert {} dot spaces".format( seq[0]) )
+
+        elif( seq[0] == 0x24 ):   print( "Switch to Standard ASCII characters *" )
+        elif( seq[0] == 0x26 ):   print( "Remap MouseText To Low Ascii" )
+        elif( seq[0] == 0x27 ):   print( "Switch to custom character font" )
+        elif( seq[0] == 0x2a ):   print( "Switch to custom character font (high vals)" )
+        elif( seq[0] == 0x2b ):   print( "Max width of custom chars: 16 dots")
+        elif( seq[0] == 0x2d ):   print( "Max width of custom chars: 8 dots *" )
+        
+        elif( seq[0] == 0x58 ):   print( "Start Underline" )
+        elif( seq[0] == 0x59 ):   print( "Stop Underline *" )
+        elif( seq[0] == 0x21 ):   print( "Start Bold" )
+        elif( seq[0] == 0x22 ):   print( "Stop Bold *" )
+
+        elif( seq[0] == 0x77 ):   print( "Start Half-Height" )
+        elif( seq[0] == 0x57 ):   print( "Stop Half-Height *" )
+        
+        elif( seq[0] == 0x78 ):   print( "Start Superscript" )
+        elif( seq[0] == 0x79 ):   print( "Start Subscript" )
+        elif( seq[0] == 0x7a ):   print( "Stop Super/Subscript *" )
+        
+
+        elif( seq[0] == 0x6e ):   print( "9 cpi - extended" )
+        elif( seq[0] == 0x4e ):   print( "10 cpi - pica" )
+        elif( seq[0] == 0x45 ):   print( "12 cpi - elite" )
+        elif( seq[0] == 0x65 ):   print( "13.4 cpi - semicondensed" )
+        elif( seq[0] == 0x71 ):   print( "15 cpi - condensed" )
+        elif( seq[0] == 0x51 ):   print( "17 cpi - ultracondensed" )
+        
+        elif( seq[0] == 0x70 ):   print( "144 dpi - pica proportional" )
+        elif( seq[0] == 0x50 ):   print( "160 cpi - elite proportional" )
+        
+        elif( seq[0] == 0x41 ):   print( "6 lines per inch *" )
+        elif( seq[0] == 0x42 ):   print( "8 lines per inch" )
+        elif( seq[0] == 0x54 ):   print( "Distance between lines" )
+        
+        elif( seq[0] == 0x66 ):   print( "Forward line feeding *" )
+        elif( seq[0] == 0x72 ):   print( "Reverse line feeding" )
+        elif( seq[0] == 0x76 ):   print( "Set TOF to current pos" )
+        
+        elif( seq[0] == 0x3e ):   print( "Unidirectional printing" )
+        elif( seq[0] == 0x3c ):   print( "Bidirectional printing *" )
+        
+        elif( seq[0] == 0x4f ):   print( "Paper out sensor off" )
+        elif( seq[0] == 0x6f ):   print( "Paper out sensor on *" )
+
+        elif( seq[0] == 0x28 ):   print( "Set Tabstops" )
+        elif( seq[0] == 0x75 ):   print( "Set One Tabstop" )
+        elif( seq[0] == 0x29 ):   print( "Clear Tabstops" )
+        elif( seq[0] == 0x30 ):   print( "Clear All Tabs" )
+
+        elif( seq[0] == 0x6c ):
+            if( seq[1] == 0x30 ):
+                print( "Insert CR before LF and FF *" )
+            elif( seq[1] == 0x31 ): 
+                print( "No CR before LF and FF" )
+
+        elif( seq[0] == 0x49 ):
+            print( "Start Load custom characters" )
+            # ends with 0x04
+
+        elif( seq[0] == 0x46 ):
+            print( "Place Print Head from left margin" )
+        elif( seq[0] == 0x73 ):
+            print( "Set dot spacing to {}".format( seq[1] ))
+        elif( seq[0] == 0x47 ):
+            print( "Print a line of graphics" )
+        elif( seq[0] == 0x53 ):
+            print( "Print a line of graphics" )
+        elif( seq[0] == 0x67 ):
+            print( "Print a line of graphics *8" )
+        elif( seq[0] == 0x56 ):
+            print( "Print repetitions of dots" )
+        
+        elif( seq[0] == 0x52 ):
+            print( "Repeat character N times" )
+        
+        elif( seq[0] == 0x61 ):
+            if( seq[1] == 0x30 ):
+                print( "FONT: Correspondence" )
+            elif( seq[1] == 0x31 ):
+                print( "FONT: Draft *" )
+            elif( seq[1] ==  0x32 ):
+                print( "FONT: NLQ" )
+        elif( seq[0] == 0x6d ):
+            print( "FONT: Correspondence" )
+        elif( seq[0] == 0x4d ):
+            print( "FONT: Draft *" )
+
+
+        elif( seq[0] == 0x44 ):
+            if( seq[1] == 0x00 and seq[2] == 0x20 ):
+                print( "IGNORE 8th data bit *" )
+            # additional ones will set character sets.
+
+        elif( seq[0] == 0x5A ):
+            if( seq[1] == 0x00 and seq[2] == 0x20 ):
+                print( "INCLUDE 8th data bit" )
+            # additional ones will set character sets.
+
+        elif( seq[0] == 0x4c ):
+            print( "Set left margin..." )
+        elif( seq[0] == 0x48 ):
+            print( "Set page length..." )
+
+        elif( seq[0] == 0x4b ):
+            if( seq[1] == 0x30 ): 
+                print( "Color: Black *" )
+            elif( seq[1] == 0x31 ): 
+                print( "Color: Yellow" )
+            elif( seq[1] == 0x32 ): 
+                print( "Color: Magenta" )
+            elif( seq[1] == 0x33 ): 
+                print( "Color: Cyan" )
+            elif( seq[1] == 0x34 ): 
+                print( "Color: Orange (YM)" )
+            elif( seq[1] == 0x35 ): 
+                print( "Color: Green (YC)" )
+            elif( seq[1] == 0x36 ): 
+                print( "Color: Purple (MC)" )
+
+        elif( seq[0] >= 0x31 and seq[0] < 0x3f ):
+            print( "Feed {} lines blank paper".format( seq[0] - 0x30 ))
+
+        else:
+            sys.stdout.write( "UNK ESC: {} {} {} {} {} {} \n".format( 
+            self.Hex( seq[0] ), self.Hex( seq[1] ), 
+            self.Hex( seq[2] ), self.Hex( seq[3] ),  
+            self.Hex( seq[4] ), self.Hex( seq[5] ), ))
 
 
     def HandleByte( self, ch ):
@@ -294,26 +484,37 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         #ch = chr( ord( ch ) & 0x7f)
 
         if self.escRemaining > 0:
+            if self.escRemaining == 999:
+                # it's the first one in the sequence... we need to set it up
+                self.escRemaining = self.GetSeqLen( ch )
+                if self.escRemaining == 0:
+                    # unknown
+                    print( "ERROR: Bad Escape sequence {}".format( ch ))
+                    return
+
+            # we know it, so set it up
             self.escRemaining = self.escRemaining - 1
             self.escSequence[ self.escIdx ] = ch
             self.escIdx = self.escIdx + 1
 
+            # check if we've got the whole expected sequence
             if self.escRemaining == 0:
+                # yep! hand it off!
                 self.HandleEscapeSequence( self.escSequence )
         else:
             if ch == 0x1b: 
-                sys.stdout.write( "[ESC]" )
                 # it's the start of an escape sequence
                 # prep for accumulating it...
-                self.escRemaining = 0 # determine
-                self.escSequence = [ '\0','\0','\0','\0' ]
+                self.escRemaining = 999 # determine
+                self.escSequence = self.ClearEscapeSequence()
                 self.escIdx = 0
 
                 # now determine how big the thing is.
             else:
-                # it's boring content. just output it.
-                sys.stdout.write( "." ) #.format( chr(ch) ) ) 
-                sys.stdout.flush()
+                if not self.HandleControlCharacter( ch ):
+                    # it's boring content. just output it. or something
+                    sys.stdout.write( chr(ch) )
+                    sys.stdout.flush()
 
 
     def data_received(self, data):
@@ -326,6 +527,8 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         if not self.file == None:
             self.file.write( data )
             self.fSize += 1
+
+
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def RequestPortOrDirectory():
@@ -344,7 +547,7 @@ def RequestPortOrDirectory():
         ports.append(port)
 
     while True:
-        port = input('--- Enter port index or full name or directory: ')
+        port = input('--- Enter port index, full name, directory, or hit return: ')
 
         if port == '' or int( port ) == 0:
             return 'Printouts/'
@@ -362,15 +565,13 @@ def RequestPortOrDirectory():
         return port
 
 
-def splash():
-    print( '## LlamaWriterSim - An ImageWriterII simulator of sorts.' )
-    print( '##    v{} {}'.format( VERSION, VERS_DATE ))
-    print( '##   (c) Scott Lawrence - yorgle@gmail.com' )
 
 if __name__ == '__main__':  # noqa
     import argparse
 
-    splash()
+    print( '## LlamaWriterSim - An ImageWriterII simulator of sorts.' )
+    print( '##    v{} {}'.format( VERSION, VERS_DATE ))
+    print( '##   (c) Scott Lawrence - yorgle@gmail.com' )
 
     parser = argparse.ArgumentParser(
         description='Handle IW2 escape sequences.',

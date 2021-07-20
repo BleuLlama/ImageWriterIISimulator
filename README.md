@@ -1,4 +1,4 @@
-#ImageWriterIISimulator
+#ImageWriterIISimulator / LlamaWriter
 A serial-reading simulation of an Apple ImageWriterII printer.
 
 This project was created as an entry for
