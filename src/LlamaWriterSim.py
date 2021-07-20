@@ -46,6 +46,9 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         self.escIdx = 0
         self.escSequence = self.ClearEscapeSequence()
 
+        # current printer state
+        self.state = {};
+
         # Length of escape sequences, based on the first byte; after 0x1b
         self.eSeqLen = [
             [ 1, [ # these have no parameters
@@ -146,9 +149,41 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         #   0x1b 0x29 - clear multiple tabstops
         #
         #   0x1F N    - feed 1..15 lines 1-9 : ; = > ?
+        self.ResetState();
 
     def __call__(self):
         return self
+
+    def ResetState( self ):
+        self.state = {
+            "font"          : "draft",
+            "bit8"          : "ignore",
+            "charset"       : "ASCII",
+            "language"      : "American",
+            "printdirection": "bidirectional",  # or unidirectional
+            "printdirection": "bidirectional",  # or unidirectional
+            "selecged"      : True,
+
+            "color"         : "K",
+            "ccharwid"      : 8,
+            "lpi"           : 6,
+            "cpi"           : 12,
+            "leftmargin"    : 0,
+            "linefeeding"   : "forward",
+            "paperoutsens"  : False,
+            "insCRbeforeLF" : True,
+            "LFwhenlinefull": False,
+
+            "doublewidth"   : False,
+            "halfheight"    : False,
+            "bold"          : False,
+            "italic"        : False,
+            "underline"     : False,
+            "superscript"   : False,
+            "subscript"     : False,
+            "slashzeroes"   : False,
+
+        };
 
 
     def GetSeqLen( self, firstByte ):
