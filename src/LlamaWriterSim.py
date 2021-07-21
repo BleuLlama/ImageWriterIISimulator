@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 #
-# LlamaWriterSim - An ImageWriter II simulator of sorts
+# LlamaWriter - An ImageWriter II simulator of sorts
 #
 #   (c)2021 Scott Lawrence / yorgle@gmail.com
 #
 
 
-VERSION = '0.04'
-VERS_DATE = '2021-07-20'
+VERSION = '0.05'
+VERS_DATE = '2021-07-21'
 
+# v0.05 - 2021-07-21 - Audio moved to a class, toggleable via cmd line, autoconfigures
 # v0.04 - 2021-07-20 - Reorganization, Initial audio support
 # v0.03 - 2021-07-19 - Changed how logging reprints works
 # v0.02 - 2021-07-19 - Added reprinting
@@ -34,11 +35,20 @@ VERS_DATE = '2021-07-20'
 # [  ][ON]  standard
 # [ON][ON]  nlq
 
+
+# general application configuration stuff
+config = {
+    'audio' : True,     # should we output audio?
+}
+
+
 import sys
 import serial
 import serial.threaded
 import time
 import os
+
+import subprocess
 
 from serial.tools.list_ports import comports
 from serial.tools import hexlify_codec
@@ -46,18 +56,77 @@ from serial.tools import hexlify_codec
 from os import listdir
 from os.path import isfile, join
 
-#from playsound import playsound
-#playsound( 'Audio/Startup.mp3', False ) # should work
-import subprocess
-aproc = subprocess.Popen( ['mpg123', 'Audio/Startup.mp3' ],
-    True,
-    close_fds=True,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL )
+# python libraries "needed":
+#   pip3 install pyserial
+#   pip3 install playsound
+#   pip3 install AppKit
 
-# pip3 install pyserial
-# pip3 install playsound
-# pip3 install AppKit
+
+class LlamaAudio():
+
+    def __init__( self, startupEnabled ):
+        self.audioMethod = None
+        self.enabled = startupEnabled
+
+        if startupEnabled:
+            self.AutoConfigure();
+
+
+    def AutoConfigure( self ):
+        # attempt to autoconfigure for audio
+
+        self.audioMethod = None;
+
+        try: 
+            # attempt to use playsound library
+            from playsound import playsound
+            playsound( 'Audio/Startup.mp3', False ) # should work
+            self.enabled = True
+            self.audioMethod = 'playsound'
+
+        except:
+            # something went wrong... attempt to use mpg123 via shell
+            self.enabled = True
+            self.audioMethod = 'mpg123'
+            success = self.Play( 'Audio/Startup.mp3' )
+            if not success:
+                # something went wronger... just forget the whole thing,
+                self.audioMethod = None
+                self.enabled = False
+            pass
+
+        if not self.enabled:
+            print( "--- Unable to autoconfigure audio playback. Sorry." )
+
+        return self.enabled
+
+
+    def Play( self, fname ):
+        """ Play the specified sound file.
+            returns False if it was unable to.
+            """
+        if not self.enabled:
+            return False
+
+        if self.audioMethod == 'playsound':
+            playsound( fname, False )
+
+        elif self.audioMethod == 'mpg123':
+            try:
+                aproc = subprocess.Popen( [ 'mpg123', fname ],
+                    True, # background.
+                    close_fds=True,  # suppress all output
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL )
+            except: 
+                pass
+                return False
+
+        else:
+            print( ' *** ERROR: {}: Unknown audio method.'.format( self.audioMethod ))
+            return False
+
+        return True
 
 
 class IWProtocolHandler( serial.threaded.Protocol ):
@@ -424,7 +493,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
         otherwise return false
         """
         if ch == 0x04:
-            print( "[EOT]" ) #End loading new characters" )
+            print( "[EOT]" ) # End loading new character bitmaps
 
         elif ch == 0x08:
             print( "[BS]" ) # backspace
@@ -455,13 +524,16 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
         return True
 
+
     def SerResponse( self, txt ):
+        """ send back a response to the printing computer """
         if self.serialport == None:
             return
         self.serialport.write( txt );
 
 
     def CmdPrint( self, txt ):
+        """ debug text to show when we get an inline command """
         self.SerResponse( '<{}>'.format( txt ) );
 
 
@@ -618,7 +690,8 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
 
     def HandleByte( self, ch ):
-        """ primary valve for the stream of bytes """
+        """ primary valve for the stream of data bytes from the printing computer """
+
         self.tick = 0;
         # python3 - ch is of type 'int'
 
@@ -661,11 +734,12 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
     def data_received(self, data):
         """ input from the serial stream """
+
         # send it to our handler
         for ch in data:
             self.HandleByte( ch )
 
-        # and log it to the output file
+        # also log it to the output file
         if not self.file == None:
             self.file.write( data )
             self.fSize += 1
@@ -674,11 +748,11 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-class LlamaWriterSimApp():
+class LlamaWriterApp():
 
     def __init__(self):
 
-        print( '## LlamaWriterSim - An ImageWriterII simulator of sorts.' )
+        print( '## LlamaWriter - An ImageWriterII simulator of sorts.' )
         print( '##    v{} {}'.format( VERSION, VERS_DATE ))
         print( '##   (c) Scott Lawrence - yorgle@gmail.com' )
 
@@ -690,7 +764,7 @@ class LlamaWriterSimApp():
 
         import argparse
         parser = argparse.ArgumentParser(
-            description='Handle IW2 escape sequences.',
+            description='Handle ImageWriter print sequences.',
             epilog="""\
     Pretend to be a printer.
     """)
@@ -713,6 +787,12 @@ class LlamaWriterSimApp():
             action='store_true',
             help='suppress non error messages',
             default=False)
+
+        parser.add_argument(
+            '-s', '--silent',
+            action='store_true',
+            help='disable audio playback',
+            default=True)
 
         parser.add_argument(
             '--develop',
@@ -768,6 +848,12 @@ class LlamaWriterSimApp():
             default=None)
 
         self.args = parser.parse_args()
+
+
+        if not self.args.silent:
+            audio = LlamaAudio( True )
+        else:
+            audio = LlamaAudio( False )
 
 
     def StartOffline( self ):
@@ -828,7 +914,13 @@ class LlamaWriterSimApp():
 
         # if a port was specified, use it.
         if self.args.SERIALPORT is False:
-            self.args.SERIALPORT = self.RequestPortOrDirectory()
+            try:
+                self.args.SERIALPORT = self.RequestPortOrDirectory()
+            except:
+                pass
+                print( "Unable to configure interface." )
+                print( "Exiting." )
+                return;
 
         # spin up a protocol handler
         self.iw_protocol_handler = IWProtocolHandler();
@@ -917,16 +1009,24 @@ class LlamaWriterSimApp():
             ports.append(port)
 
         while True:
-            port = input('--- Enter port index, full name, directory, or hit return:\n ?> ')
+            #port = input('--- Enter port index, full name, directory, or hit return:\n ?> ')
+            port = input('--- Enter port index, or hit return (0):\n ?> ')
 
-            if port == '' or int( port ) == 0:
+            try:
+                chosenNo = 0
+                chosenNo = int( port )
+            except:
+                pass
+
+            if port == '' or port == '0':
                 return 'Printouts/'
 
             try:
-                index = int(port) - 1
+                index = chosenNo - 1
                 if not 0 <= index < len(ports):
-                    sys.stderr.write('--- Invalid index!\n')
+                    sys.stderr.write( " *** Invalid selection!\n" )
                     continue
+
             except ValueError:
                 pass
             else:
@@ -938,10 +1038,13 @@ class LlamaWriterSimApp():
 
 if __name__ == '__main__': 
 
-    llamawriter = LlamaWriterSimApp()
+    # instantiate our application itself
+    llamawriter = LlamaWriterApp()
 
+    # parse the command line arguments
     llamawriter.ParseArgs()
 
+    # do the runloop
     llamawriter.DoTheThing()
 
     sys.stderr.write('\n--- exiting ---\n')
