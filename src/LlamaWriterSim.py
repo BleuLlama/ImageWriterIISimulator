@@ -6,9 +6,10 @@
 #
 
 
-VERSION = '0.03'
-VERS_DATE = '2021-07-19'
+VERSION = '0.04'
+VERS_DATE = '2021-07-20'
 
+# v0.04 - 2021-07-20 - Reorganization, Initial audio support
 # v0.03 - 2021-07-19 - Changed how logging reprints works
 # v0.02 - 2021-07-19 - Added reprinting
 # v0.01 - 2021-07-18 - indev version
