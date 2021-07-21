@@ -14,6 +14,25 @@ VERS_DATE = '2021-07-19'
 # v0.01 - 2021-07-18 - indev version
 
 
+# Control panel
+#
+#  [ e1 ][ p1 ]  [     on/off    ]            
+#  [ s1 ][ s2 ]  [     select    ]
+#  [ q1 ][ q2 ]  [ print quality ]
+#                [   line feed   ]
+#                [   form feed   ]
+
+#  e1 - error - red
+#       solid - paper out
+#       blink - cover off or print jam
+#  p1 - power - green
+#  s1,s2 - select enabled - green
+
+#  q1  q2 - both green
+# [ON][  ]  draft
+# [  ][ON]  standard
+# [ON][ON]  nlq
+
 import sys
 import serial
 import serial.threaded
@@ -26,14 +45,36 @@ from serial.tools import hexlify_codec
 from os import listdir
 from os.path import isfile, join
 
+#from playsound import playsound
+#playsound( 'Audio/Startup.mp3', False ) # should work
+import subprocess
+aproc = subprocess.Popen( ['mpg123', 'Audio/Startup.mp3' ],
+    True,
+    close_fds=True,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL )
 
-class LlamaWriterSim( serial.threaded.Protocol ):
+# pip3 install pyserial
+# pip3 install playsound
+# pip3 install AppKit
+
+
+class IWProtocolHandler( serial.threaded.Protocol ):
     """serial/file to file/outputs/etc"""
+
+    # Notes:
+    #   When printer buffer space < 30, printer sets DTR False "Busy"
+    #   When printer buffer space > 100, printer sets DTR True "Ready"
+    #   When printer buffer space < 266, printer sends ^S (XOFF)
+    #   when printer buffer space > 337, printer sends ^Q (XON)
+    #   - this might be why MacWrite prints fail.
 
     def __init__(self):
         self.count = 0
         self.tick = 0
         self.rbuf = ""
+
+        self.serialport = None
 
         self.file = None
         self.fSize = 0
@@ -147,33 +188,71 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         #
         #   0x1b 0x28 - set multiple tabstops
         #   0x1b 0x29 - clear multiple tabstops
-        #
-        #   0x1F N    - feed 1..15 lines 1-9 : ; = > ?
+        # TODO: handlers for this.
         self.ResetState();
+
 
     def __call__(self):
         return self
 
     def ResetState( self ):
-        self.state = {
-            "font"          : "draft",
-            "bit8"          : "ignore",
-            "charset"       : "ASCII",
+        # this is basically copied from Table A-1/A-2 in the 
+        # IWII Technical Reference Manual on page 134-135
+        # (PDF page 153-154)
+        self.state = { 
             "language"      : "American",
-            "printdirection": "bidirectional",  # or unidirectional
-            "printdirection": "bidirectional",  # or unidirectional
-            "selecged"      : True,
+                # Italian, Danish, British, German, Swedish, French, Spanish
 
-            "color"         : "K",
+            "font"          : "draft",
+                # draft
+                # correspondence
+                # nlq
+            "fontwidth"     : "fixed",
+                # fixed, proportional
+
+            "pitch"         : 12, 
+                #   9 extended
+                #  10 pica
+                #  12 elite
+                #  13.4 semicondensed
+                #  15 condensed
+                #  17 ultracondensed
+
+                # 144 dpi pica
+                # 160 dpi elite prop
+
+            "bit8"          : "ignore",
+                # ignore high bit or not
+
+            "charset"       : "ASCII",
+                # ASCII, MouseText
+
+            "printdirection": "bidirectional",  
+                # bidirectional, unidirectional
+
+            "selecged"      : True,
+                # don't remnember what this is
+
+            "color"         : "k",
+                # c, m, y, k, o (ym), g(yc), p (mc)
+
             "ccharwid"      : 8,
+                # 8, 16
+
             "lpi"           : 6,
-            "cpi"           : 12,
+                # 6, 8
+
             "leftmargin"    : 0,
+
             "linefeeding"   : "forward",
+                # forward, reverse
+
             "paperoutsens"  : False,
             "insCRbeforeLF" : True,
             "LFwhenlinefull": False,
+            "slashzeroes"   : False,
 
+            # styling
             "doublewidth"   : False,
             "halfheight"    : False,
             "bold"          : False,
@@ -181,10 +260,11 @@ class LlamaWriterSim( serial.threaded.Protocol ):
             "underline"     : False,
             "superscript"   : False,
             "subscript"     : False,
-            "slashzeroes"   : False,
-
         };
 
+    def PowerDown( self ):
+        """ do all of the necessfary junk for pilot on the burner """
+        self.CloseFile();
 
     def GetSeqLen( self, firstByte ):
         """ Go through the table above, and find the matching opcode.
@@ -273,7 +353,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
         theList = self.DirList( self.Printouts, ".raw" )
 
         if( request == '' ):
-            print( "No printout selected.  Usage: r <number>" )
+            print( "No printout chosen.  Usage: r <number>" )
             self.PrintList( theList )
             return;
 
@@ -363,7 +443,7 @@ class LlamaWriterSim( serial.threaded.Protocol ):
             print( "[SDW]" ) # Stop double-width printing
 
         elif ch == 0x11:
-            print( "[XON]" ) # Select Printer *
+            print( "[XON]" ) # Select Printer * 
         elif ch == 0x13:
             print( "[XOFF]" ) # Deselect Printer
         elif ch == 0x18:
@@ -374,144 +454,166 @@ class LlamaWriterSim( serial.threaded.Protocol ):
 
         return True
 
+    def SerResponse( self, txt ):
+        if self.serialport == None:
+            return
+        self.serialport.write( txt );
+
+
+    def CmdPrint( self, txt ):
+        self.SerResponse( '<{}>'.format( txt ) );
+
 
     def HandleEscapeSequence( self, seq ):
         """ When the code gets to here, we have a completed escape sequence. """
 
         # [0] is the base command. [1]..[5] are arguments.
-        if( seq[0] == 0x63 ):   print( "Reset Defaults" )
-        elif( seq[0] == 0x3F ):   print( "Send ID String" )
+        if( seq[0] == 0x63 ):   
+            self.CmdPrint( "Reset Defaults" )
+            self.ResetState()
+
+        elif( seq[0] == 0x3F ):   
+            self.CmdPrint( "Send ID String" )
+            # IW10CF
+            # | | |+--- Sheet feeder installed
+            # | | +---- Color ribbon in place
+            # | +------ 10 inch carriage
+            # +-------- ImageWriter printer
+
+            if not self.serialport == None:
+                self.SerResponse( "IW10C" ) 
+                # not sure if \n or \r are needed for this. need to test.
 
         elif( seq[0] >= 0x01 and seq[0] <= 0x06 ):
-            print( "Insert {} dot spaces".format( seq[0]) )
+            self.CmdPrint( "Insert {} dot spaces".format( seq[0]) )
 
-        elif( seq[0] == 0x24 ):   print( "Switch to Standard ASCII characters *" )
-        elif( seq[0] == 0x26 ):   print( "Remap MouseText To Low Ascii" )
-        elif( seq[0] == 0x27 ):   print( "Switch to custom character font" )
-        elif( seq[0] == 0x2a ):   print( "Switch to custom character font (high vals)" )
-        elif( seq[0] == 0x2b ):   print( "Max width of custom chars: 16 dots")
-        elif( seq[0] == 0x2d ):   print( "Max width of custom chars: 8 dots *" )
+        elif( seq[0] == 0x24 ):   self.CmdPrint( "Switch to Standard ASCII characters *" )
+        elif( seq[0] == 0x26 ):   self.CmdPrint( "Remap MouseText To Low Ascii" )
+        elif( seq[0] == 0x27 ):   self.CmdPrint( "Switch to custom character font" )
+        elif( seq[0] == 0x2a ):   self.CmdPrint( "Switch to custom character font (high vals)" )
+        elif( seq[0] == 0x2b ):   self.CmdPrint( "Max width of custom chars: 16 dots")
+        elif( seq[0] == 0x2d ):   self.CmdPrint( "Max width of custom chars: 8 dots *" )
         
-        elif( seq[0] == 0x58 ):   print( "Start Underline" )
-        elif( seq[0] == 0x59 ):   print( "Stop Underline *" )
-        elif( seq[0] == 0x21 ):   print( "Start Bold" )
-        elif( seq[0] == 0x22 ):   print( "Stop Bold *" )
+        elif( seq[0] == 0x58 ):   self.CmdPrint( "Start Underline" )
+        elif( seq[0] == 0x59 ):   self.CmdPrint( "Stop Underline *" )
+        elif( seq[0] == 0x21 ):   self.CmdPrint( "Start Bold" )
+        elif( seq[0] == 0x22 ):   self.CmdPrint( "Stop Bold *" )
 
-        elif( seq[0] == 0x77 ):   print( "Start Half-Height" )
-        elif( seq[0] == 0x57 ):   print( "Stop Half-Height *" )
+        elif( seq[0] == 0x77 ):   self.CmdPrint( "Start Half-Height" )
+        elif( seq[0] == 0x57 ):   self.CmdPrint( "Stop Half-Height *" )
         
-        elif( seq[0] == 0x78 ):   print( "Start Superscript" )
-        elif( seq[0] == 0x79 ):   print( "Start Subscript" )
-        elif( seq[0] == 0x7a ):   print( "Stop Super/Subscript *" )
+        elif( seq[0] == 0x78 ):   self.CmdPrint( "Start Superscript" )
+        elif( seq[0] == 0x79 ):   self.CmdPrint( "Start Subscript" )
+        elif( seq[0] == 0x7a ):   self.CmdPrint( "Stop Super/Subscript *" )
         
 
-        elif( seq[0] == 0x6e ):   print( "9 cpi - extended" )
-        elif( seq[0] == 0x4e ):   print( "10 cpi - pica" )
-        elif( seq[0] == 0x45 ):   print( "12 cpi - elite" )
-        elif( seq[0] == 0x65 ):   print( "13.4 cpi - semicondensed" )
-        elif( seq[0] == 0x71 ):   print( "15 cpi - condensed" )
-        elif( seq[0] == 0x51 ):   print( "17 cpi - ultracondensed" )
+        elif( seq[0] == 0x6e ):   self.CmdPrint( "9 cpi - extended" )
+        elif( seq[0] == 0x4e ):   self.CmdPrint( "10 cpi - pica" )
+        elif( seq[0] == 0x45 ):   self.CmdPrint( "12 cpi - elite" )
+        elif( seq[0] == 0x65 ):   self.CmdPrint( "13.4 cpi - semicondensed" )
+        elif( seq[0] == 0x71 ):   self.CmdPrint( "15 cpi - condensed" )
+        elif( seq[0] == 0x51 ):   self.CmdPrint( "17 cpi - ultracondensed" )
         
-        elif( seq[0] == 0x70 ):   print( "144 dpi - pica proportional" )
-        elif( seq[0] == 0x50 ):   print( "160 cpi - elite proportional" )
+        elif( seq[0] == 0x70 ):   self.CmdPrint( "144 dpi - pica proportional" )
+        elif( seq[0] == 0x50 ):   self.CmdPrint( "160 cpi - elite proportional" )
         
-        elif( seq[0] == 0x41 ):   print( "6 lines per inch *" )
-        elif( seq[0] == 0x42 ):   print( "8 lines per inch" )
-        elif( seq[0] == 0x54 ):   print( "Distance between lines" )
+        elif( seq[0] == 0x41 ):   self.CmdPrint( "6 lines per inch *" )
+        elif( seq[0] == 0x42 ):   self.CmdPrint( "8 lines per inch" )
+        elif( seq[0] == 0x54 ):   self.CmdPrint( "Distance between lines" )
         
-        elif( seq[0] == 0x66 ):   print( "Forward line feeding *" )
-        elif( seq[0] == 0x72 ):   print( "Reverse line feeding" )
-        elif( seq[0] == 0x76 ):   print( "Set TOF to current pos" )
+        elif( seq[0] == 0x66 ):   self.CmdPrint( "Forward line feeding *" )
+        elif( seq[0] == 0x72 ):   self.CmdPrint( "Reverse line feeding" )
+        elif( seq[0] == 0x76 ):   self.CmdPrint( "Set TOF to current pos" )
         
-        elif( seq[0] == 0x3e ):   print( "Unidirectional printing" )
-        elif( seq[0] == 0x3c ):   print( "Bidirectional printing *" )
+        elif( seq[0] == 0x3e ):   self.CmdPrint( "Unidirectional printing" )
+        elif( seq[0] == 0x3c ):   self.CmdPrint( "Bidirectional printing *" )
         
-        elif( seq[0] == 0x4f ):   print( "Paper out sensor off" )
-        elif( seq[0] == 0x6f ):   print( "Paper out sensor on *" )
+        elif( seq[0] == 0x4f ):   self.CmdPrint( "Paper out sensor off" )
+        elif( seq[0] == 0x6f ):   self.CmdPrint( "Paper out sensor on *" )
 
-        elif( seq[0] == 0x28 ):   print( "Set Tabstops" )
-        elif( seq[0] == 0x75 ):   print( "Set One Tabstop" )
-        elif( seq[0] == 0x29 ):   print( "Clear Tabstops" )
-        elif( seq[0] == 0x30 ):   print( "Clear All Tabs" )
+        elif( seq[0] == 0x28 ):   self.CmdPrint( "Set Tabstops" )
+        elif( seq[0] == 0x75 ):   self.CmdPrint( "Set One Tabstop" )
+        elif( seq[0] == 0x29 ):   self.CmdPrint( "Clear Tabstops" )
+        elif( seq[0] == 0x30 ):   self.CmdPrint( "Clear All Tabs" )
 
         elif( seq[0] == 0x6c ):
             if( seq[1] == 0x30 ):
-                print( "Insert CR before LF and FF *" )
+                self.CmdPrint( "Insert CR before LF and FF *" )
             elif( seq[1] == 0x31 ): 
-                print( "No CR before LF and FF" )
+                self.CmdPrint( "No CR before LF and FF" )
 
         elif( seq[0] == 0x49 ):
-            print( "Start Load custom characters" )
+            self.CmdPrint( "Start Load custom characters" )
             # ends with 0x04
 
         elif( seq[0] == 0x46 ):
-            print( "Place Print Head from left margin" )
+            self.CmdPrint( "Place Print Head from left margin" )
         elif( seq[0] == 0x73 ):
-            print( "Set dot spacing to {}".format( seq[1] ))
+            self.CmdPrint( "Set dot spacing to {}".format( seq[1] ))
         elif( seq[0] == 0x47 ):
-            print( "Print a line of graphics" )
+            self.CmdPrint( "Print a line of graphics" )
         elif( seq[0] == 0x53 ):
-            print( "Print a line of graphics" )
+            self.CmdPrint( "Print a line of graphics" )
         elif( seq[0] == 0x67 ):
-            print( "Print a line of graphics *8" )
+            self.CmdPrint( "Print a line of graphics *8" )
         elif( seq[0] == 0x56 ):
-            print( "Print repetitions of dots" )
+            self.CmdPrint( "Print repetitions of dots" )
         
         elif( seq[0] == 0x52 ):
-            print( "Repeat character N times" )
+            self.CmdPrint( "Repeat character N times" )
         
         elif( seq[0] == 0x61 ):
             if( seq[1] == 0x30 ):
-                print( "FONT: Correspondence" )
+                self.CmdPrint( "FONT: Correspondence" )
             elif( seq[1] == 0x31 ):
-                print( "FONT: Draft *" )
+                self.CmdPrint( "FONT: Draft *" )
             elif( seq[1] ==  0x32 ):
-                print( "FONT: NLQ" )
+                self.CmdPrint( "FONT: NLQ" )
         elif( seq[0] == 0x6d ):
-            print( "FONT: Correspondence" )
+            self.CmdPrint( "FONT: Correspondence" )
         elif( seq[0] == 0x4d ):
-            print( "FONT: Draft *" )
+            self.CmdPrint( "FONT: Draft *" )
 
 
         elif( seq[0] == 0x44 ):
             if( seq[1] == 0x00 and seq[2] == 0x20 ):
-                print( "IGNORE 8th data bit *" )
+                self.CmdPrint( "IGNORE 8th data bit *" )
             # additional ones will set character sets.
 
         elif( seq[0] == 0x5A ):
             if( seq[1] == 0x00 and seq[2] == 0x20 ):
-                print( "INCLUDE 8th data bit" )
+                self.CmdPrint( "INCLUDE 8th data bit" )
             # additional ones will set character sets.
 
         elif( seq[0] == 0x4c ):
-            print( "Set left margin..." )
+            self.CmdPrint( "Set left margin..." )
         elif( seq[0] == 0x48 ):
-            print( "Set page length..." )
+            self.CmdPrint( "Set page length..." )
 
         elif( seq[0] == 0x4b ):
             if( seq[1] == 0x30 ): 
-                print( "Color: Black *" )
+                self.CmdPrint( "Color: Black *" )
             elif( seq[1] == 0x31 ): 
-                print( "Color: Yellow" )
+                self.CmdPrint( "Color: Yellow" )
             elif( seq[1] == 0x32 ): 
-                print( "Color: Magenta" )
+                self.CmdPrint( "Color: Magenta" )
             elif( seq[1] == 0x33 ): 
-                print( "Color: Cyan" )
+                self.CmdPrint( "Color: Cyan" )
             elif( seq[1] == 0x34 ): 
-                print( "Color: Orange (YM)" )
+                self.CmdPrint( "Color: Orange (YM)" )
             elif( seq[1] == 0x35 ): 
-                print( "Color: Green (YC)" )
+                self.CmdPrint( "Color: Green (YC)" )
             elif( seq[1] == 0x36 ): 
-                print( "Color: Purple (MC)" )
+                self.CmdPrint( "Color: Purple (MC)" )
 
         elif( seq[0] >= 0x31 and seq[0] < 0x3f ):
-            print( "Feed {} lines blank paper".format( seq[0] - 0x30 ))
+            self.CmdPrint( "Feed {} lines blank paper".format( seq[0] - 0x30 ))
 
         else:
-            sys.stdout.write( "UNK ESC: {} {} {} {} {} {} \n".format( 
-            self.Hex( seq[0] ), self.Hex( seq[1] ), 
-            self.Hex( seq[2] ), self.Hex( seq[3] ),  
-            self.Hex( seq[4] ), self.Hex( seq[5] ), ))
+            self.CmdPrint( "UNK ESC: {} {} {} {} {} {} \n".format( 
+                self.Hex( seq[0] ), self.Hex( seq[1] ), 
+                self.Hex( seq[2] ), self.Hex( seq[3] ),  
+                self.Hex( seq[4] ), self.Hex( seq[5] ), ))
 
 
     def HandleByte( self, ch ):
@@ -570,243 +672,275 @@ class LlamaWriterSim( serial.threaded.Protocol ):
 
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def RequestPortOrDirectory():
-    """\
-    Show a list of ports and ask the user for a choice. To make selection
-    easier on systems with long device names, also allow the input of an
-    index.
-    """
-    sys.stderr.write('\n--- Source selection options:\n')
-    ports = []
 
-    sys.stderr.write('--- {:2}: {:20} {!r} (default)\n'.format(0, 'Printouts/', 'printout directory'))
+class LlamaWriterSimApp():
 
-    for n, (port, desc, hwid) in enumerate(sorted(comports()), 1):
-        sys.stderr.write('--- {:2}: {:20} {!r}\n'.format(n, port, desc))
-        ports.append(port)
+    def __init__(self):
 
-    while True:
-        port = input('--- Enter port index, full name, directory, or hit return: ')
+        print( '## LlamaWriterSim - An ImageWriterII simulator of sorts.' )
+        print( '##    v{} {}'.format( VERSION, VERS_DATE ))
+        print( '##   (c) Scott Lawrence - yorgle@gmail.com' )
 
-        if port == '' or int( port ) == 0:
-            return 'Printouts/'
+    def __call__(self):
+        return self
 
-        try:
-            index = int(port) - 1
-            if not 0 <= index < len(ports):
-                sys.stderr.write('--- Invalid index!\n')
-                continue
-        except ValueError:
-            pass
-        else:
-            port = ports[index]
+    def ParseArgs( self ):
+        """ Read the command line arguments """
 
-        return port
+        import argparse
+        parser = argparse.ArgumentParser(
+            description='Handle IW2 escape sequences.',
+            epilog="""\
+    Pretend to be a printer.
+    """)
 
+        parser.add_argument(
+            'SERIALPORT',
+            nargs='?',
+            help="serial port name",
+            default=False)
 
+        parser.add_argument(
+            'BAUDRATE',
+            type=int,
+            nargs='?',
+            help='set baud rate, default: %(default)s',
+            default=9600)
 
-if __name__ == '__main__':  # noqa
-    import argparse
+        parser.add_argument(
+            '-q', '--quiet',
+            action='store_true',
+            help='suppress non error messages',
+            default=False)
 
-    print( '## LlamaWriterSim - An ImageWriterII simulator of sorts.' )
-    print( '##    v{} {}'.format( VERSION, VERS_DATE ))
-    print( '##   (c) Scott Lawrence - yorgle@gmail.com' )
+        parser.add_argument(
+            '--develop',
+            action='store_true',
+            help='Development mode, prints Python internals on errors',
+            default=False)
 
-    parser = argparse.ArgumentParser(
-        description='Handle IW2 escape sequences.',
-        epilog="""\
-First attempt at making this thing do the thing.
-""")
+        group = parser.add_argument_group('serial port')
 
-    parser.add_argument(
-        'SERIALPORT',
-        nargs='?',
-        help="serial port name",
-        default=False)
+        group.add_argument(
+            "--bytesize",
+            choices=[5, 6, 7, 8],
+            type=int,
+            help="set bytesize, one of {5 6 7 8}, default: 8",
+            default=8)
 
-    parser.add_argument(
-        'BAUDRATE',
-        type=int,
-        nargs='?',
-        help='set baud rate, default: %(default)s',
-        default=9600)
+        group.add_argument(
+            "--parity",
+            choices=['N', 'E', 'O', 'S', 'M'],
+            type=lambda c: c.upper(),
+            help="set parity, one of {N E O S M}, default: N",
+            default='N')
 
-    parser.add_argument(
-        '-q', '--quiet',
-        action='store_true',
-        help='suppress non error messages',
-        default=False)
+        group.add_argument(
+            "--stopbits",
+            choices=[1, 1.5, 2],
+            type=float,
+            help="set stopbits, one of {1 1.5 2}, default: 1",
+            default=1)
 
-    parser.add_argument(
-        '--develop',
-        action='store_true',
-        help='Development mode, prints Python internals on errors',
-        default=False)
+        group.add_argument(
+            '--rtscts',
+            action='store_true',
+            help='enable RTS/CTS flow control (default off)',
+            default=False)
 
-    group = parser.add_argument_group('serial port')
+        group.add_argument(
+            '--xonxoff',
+            action='store_true',
+            help='enable software flow control (default off)',
+            default=False)
 
-    group.add_argument(
-        "--bytesize",
-        choices=[5, 6, 7, 8],
-        type=int,
-        help="set bytesize, one of {5 6 7 8}, default: 8",
-        default=8)
+        group.add_argument(
+            '--rts',
+            type=int,
+            help='set initial RTS line state (possible values: 0, 1)',
+            default=None)
 
-    group.add_argument(
-        "--parity",
-        choices=['N', 'E', 'O', 'S', 'M'],
-        type=lambda c: c.upper(),
-        help="set parity, one of {N E O S M}, default: N",
-        default='N')
+        group.add_argument(
+            '--dtr',
+            type=int,
+            help='set initial DTR line state (possible values: 0, 1)',
+            default=None)
 
-    group.add_argument(
-        "--stopbits",
-        choices=[1, 1.5, 2],
-        type=float,
-        help="set stopbits, one of {1 1.5 2}, default: 1",
-        default=1)
-
-    group.add_argument(
-        '--rtscts',
-        action='store_true',
-        help='enable RTS/CTS flow control (default off)',
-        default=False)
-
-    group.add_argument(
-        '--xonxoff',
-        action='store_true',
-        help='enable software flow control (default off)',
-        default=False)
-
-    group.add_argument(
-        '--rts',
-        type=int,
-        help='set initial RTS line state (possible values: 0, 1)',
-        default=None)
-
-    group.add_argument(
-        '--dtr',
-        type=int,
-        help='set initial DTR line state (possible values: 0, 1)',
-        default=None)
+        self.args = parser.parse_args()
 
 
+    def StartOffline( self ):
+        self.runmode = 'offline'
+        self.serial_worker = None
 
-    args = parser.parse_args()
-
-    if args.SERIALPORT is False:
-        args.SERIALPORT = RequestPortOrDirectory()
-
-    runmode = None
-    serial_worker = None
-
-    if os.path.isdir( args.SERIALPORT ):
-        runmode = 'offline'
-
-        if not args.quiet:
+        if not self.args.quiet:
             sys.stderr.write( 
                 '\n'
                 ' >>  Operating in offline mode using "Printouts/" directory\n'
                 ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n' 
                 )
 
-    else:
-        runmode = 'serial'
+
+    def StartWithSerial( self, worker ):
+        self.runmode = 'serial'
+        self.serial_worker = worker
 
         # connect to serial port
-        ser = serial.serial_for_url(args.SERIALPORT, do_not_open=True)
+        self.ser = serial.serial_for_url(args.SERIALPORT, do_not_open=True)
 
-        ser.baudrate = args.BAUDRATE
-        ser.bytesize = args.bytesize
-        ser.parity = args.parity
-        ser.stopbits = args.stopbits
-        ser.rtscts = args.rtscts
-        ser.xonxoff = args.xonxoff
+        self.ser.baudrate = self.args.BAUDRATE
+        self.ser.bytesize = self.args.bytesize
+        self.ser.parity = self.args.parity
+        self.ser.stopbits = self.args.stopbits
+        self.ser.rtscts = self.args.rtscts
+        self.ser.xonxoff = self.args.xonxoff
 
-        if args.rts is not None:
-            ser.rts = args.rts
+        if self.args.rts is not None:
+            self.ser.rts = self.args.rts
 
-        if args.dtr is not None:
-            ser.dtr = args.dtr
+        if self.args.dtr is not None:
+            self.ser.dtr = self.args.dtr
 
-        if not args.quiet:
+        if not self.args.quiet:
             sys.stderr.write(
                 ' >>  Operating on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
                 ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n'.format(p=ser))
 
         try:
-            ser.open()
+            self.ser.open()
         except serial.SerialException as e:
-            sys.stderr.write('Could not open serial port {}: {}\n'.format(ser.name, e))
+            sys.stderr.write('Could not open serial port {}: {}\n'.format(self.ser.name, e))
             sys.exit(1)
 
-    # both need the handler.
-    llamawriter_sim = LlamaWriterSim();
+        # attach the worker
 
-    # if we're in serial mode, connect this object to the serial port.
-    if runmode == 'serial':
-        serial_worker = serial.threaded.ReaderThread(ser, llamawriter_sim)
+        self.serial_worker = serial.threaded.ReaderThread( ser, self.iw_protocol_handler )
         # ser_to_net = SerialToNet()
         # serial_worker = serial.threaded.ReaderThread(ser, ser_to_net)
-        serial_worker.start()
+        self.iw_protocol_handler.serialport = serial
+        self.serial_worker.start()
 
-    # the main run loop..
-    try:
-        intentional_exit = False
-        print( "\nReady." )
 
-        # sit in this loop until we need to quit
+
+    def DoTheThing( self ):
+        """ the runloop """
+
+        # if a port was specified, use it.
+        if self.args.SERIALPORT is False:
+            self.args.SERIALPORT = self.RequestPortOrDirectory()
+
+        # spin up a protocol handler
+        self.iw_protocol_handler = IWProtocolHandler();
+
+        # start either offline (reprint mode) or online (serial mode)
+        if os.path.isdir( self.args.SERIALPORT ):
+            self.StartOffline()
+        else:
+            self.StartWithSerial( self.iw_protocol_handler )
+
+
+        # the main run loop..
+        try:
+            intentional_exit = False
+            print( "\nReady." )
+
+            # sit in this loop until we need to quit
+            while True:
+                try:
+
+                    cmd = input( ">: " ) # does this make you feel lost?
+                    arg = ''
+
+                    if len( cmd ) > 1:
+                        arg = cmd[1:].strip()
+
+                    if cmd == "": # do nothing
+                        print( "" ) 
+
+                    elif cmd[0] == '?': # help
+                        print( "Commands: " )
+                        print( "   q          Quit" );
+                        print( "   r          List available RAW files to reprint" );
+                        print( "   r<NUMBER>  Reprint the specified captured printout" );
+                        print( "   R<NUMBER>  Reprint with RAW logging" );
+                        print( "   t          tear off page, saving it based on timestamp" );
+                        print( "   t<NAME>   ... or save it as Printouts/<NAME>" );
+
+                    elif cmd[0] == "t": # tear off page
+                        self.iw_protocol_handler.TearOffPage( arg )
+
+                    elif cmd[0] == "r": # reprint a file
+                        self.iw_protocol_handler.Reprint( arg, False )
+
+                    elif cmd[0] == "R": # reprint a file
+                        self.iw_protocol_handler.Reprint( arg, True )
+
+                    elif cmd[0] == "q": # quit
+                        intentional_exit = True
+                        raise KeyboardInterrupt
+
+                    else: 
+                        print( "{}: Unknown command.".format( cmd ))
+
+                    #time.sleep(4)
+
+                except KeyboardInterrupt:
+                        intentional_exit = True
+                        raise
+
+        except KeyboardInterrupt:
+            pass
+
+        # make sure any files are closed
+        self.iw_protocol_handler.PowerDown()
+
+        # shut down the serial worker.
+        if self.runmode == 'serial':
+            self.serial_worker.stop()
+
+
+
+    def RequestPortOrDirectory( self ):
+        """\
+        Show a list of ports and ask the user for a choice. To make selection
+        easier on systems with long device names, also allow the input of an
+        index.
+        """
+        sys.stderr.write('\n--- Source selection options:\n')
+        ports = []
+
+        sys.stderr.write('--- {:2}: {:20} {!r} (default)\n'.format(0, 'Printouts/', 'printout directory'))
+
+        for n, (port, desc, hwid) in enumerate(sorted(comports()), 1):
+            sys.stderr.write('--- {:2}: {:20} {!r}\n'.format(n, port, desc))
+            ports.append(port)
+
         while True:
+            port = input('--- Enter port index, full name, directory, or hit return:\n ?> ')
+
+            if port == '' or int( port ) == 0:
+                return 'Printouts/'
+
             try:
-                cmd = input( ">: " ) # does this make you feel lost?
-                arg = ''
+                index = int(port) - 1
+                if not 0 <= index < len(ports):
+                    sys.stderr.write('--- Invalid index!\n')
+                    continue
+            except ValueError:
+                pass
+            else:
+                port = ports[index]
 
-                if len( cmd ) > 1:
-                    arg = cmd[1:].strip()
-
-                if cmd == "": # do nothing
-                    print( "" ) 
-
-                elif cmd[0] == '?': # help
-                    print( "Commands: " )
-                    print( "   q          Quit" );
-                    print( "   r          List available RAW files to reprint" );
-                    print( "   r<NUMBER>  Reprint the specified captured printout" );
-                    print( "   R<NUMBER>  Reprint with RAW logging" );
-                    print( "   t          tear off page, saving it based on timestamp" );
-                    print( "   t<NAME>   ... or save it as Printouts/<NAME>" );
-
-                elif cmd[0] == "t": # tear off page
-                    llamawriter_sim.TearOffPage( arg )
-
-                elif cmd[0] == "r": # reprint a file
-                    llamawriter_sim.Reprint( arg, False )
-
-                elif cmd[0] == "R": # reprint a file
-                    llamawriter_sim.Reprint( arg, True )
-
-                elif cmd[0] == "q": # quit
-                    intentional_exit = True
-                    raise KeyboardInterrupt
-
-                else: 
-                    print( "{}: Unknown command.".format( cmd ))
-
-                #time.sleep(4)
-
-            except KeyboardInterrupt:
-                    intentional_exit = True
-                    raise
-
-    except KeyboardInterrupt:
-        pass
-
-    # make sure any files are closed
-    llamawriter_sim.CloseFile( None )
-
-    # shut down the serial worker.
-    if runmode == 'serial':
-        serial_worker.stop()
+            return port
 
 
-    sys.stderr.write('\n--- exit ---\n')
+
+if __name__ == '__main__': 
+
+    llamawriter = LlamaWriterSimApp()
+
+    llamawriter.ParseArgs()
+
+    llamawriter.DoTheThing()
+
+    sys.stderr.write('\n--- exiting ---\n')
