@@ -1,5 +1,12 @@
-#ImageWriterIISimulator / LlamaWriter
-A serial-reading simulation of an Apple ImageWriterII printer.
+# LlamaWriter - An Apple ImageWriter II Simulator
+
+This is a serial-port based simulation of an Apple ImageWriterII 
+printer.  It also probably supports all ImageWriter I control 
+sequences too.
+
+The project is provided with an MIT License, however the sound files
+provided in the "Sounds" directory are provided with a Creative
+Commons - Attribution license.
 
 # CURRENT STATE
 
@@ -140,3 +147,11 @@ tackle to make this happen.  I'll be using Python3 and the PySerial library.
 - When it does, print from Print Shop, capture to file
 
 As of Jul-19, all of the above have been accomplished.
+
+
+# Sounds
+
+The Sounds directory contains a bunch of audio recordings from an
+actual ImageWriter II printer.  They were recorded by me using a 
+borrowed IW2 printer.  They are released here with a Creative 
+Commons - Attribution license.
