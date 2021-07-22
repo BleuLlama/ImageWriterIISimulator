@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 #
-# LlamaWriter - An ImageWriter II simulator of sorts
+# LlamaWriter - An ImageWriter I and II simulator of sorts
 #
 #   (c)2021 Scott Lawrence / yorgle@gmail.com
 #
 
 
-VERSION = '0.05'
+VERSION = '0.06'
 VERS_DATE = '2021-07-21'
 
+# v0.06 - 2021-07-21 - More sounds supported Fleshed out more docs
 # v0.05 - 2021-07-21 - Audio moved to a class, toggleable via cmd line, autoconfigures
 # v0.04 - 2021-07-20 - Reorganization, Initial audio support
 # v0.03 - 2021-07-19 - Changed how logging reprints works
@@ -38,7 +39,9 @@ VERS_DATE = '2021-07-21'
 
 # general application configuration stuff
 config = {
-    'audio' : True,     # should we output audio?
+    'audio'     : True,              # should we output audio?
+    'printdir'  : 'Printouts/',      # where we store all printouts
+    'soundsdir' : '../Sounds/',      # where the sound files be at
 }
 
 
@@ -56,16 +59,12 @@ from serial.tools import hexlify_codec
 from os import listdir
 from os.path import isfile, join
 
-# python libraries "needed":
-#   pip3 install pyserial
-#   pip3 install playsound
-#   pip3 install AppKit
-
 
 class LlamaAudio():
 
     def __init__( self, startupEnabled ):
         self.audioMethod = None
+        self.soundsdir = config[ 'soundsdir' ]
         self.enabled = startupEnabled
 
         if startupEnabled:
@@ -80,7 +79,7 @@ class LlamaAudio():
         try: 
             # attempt to use playsound library
             from playsound import playsound
-            playsound( 'Audio/Startup.mp3', False ) # should work
+            playsound( '{}/powerup_04_quick.mp3'.format( self.soundsdir ), False ) # should work
             self.enabled = True
             self.audioMethod = 'playsound'
 
@@ -88,7 +87,7 @@ class LlamaAudio():
             # something went wrong... attempt to use mpg123 via shell
             self.enabled = True
             self.audioMethod = 'mpg123'
-            success = self.Play( 'Audio/Startup.mp3' )
+            success = self.Play( 'powerup_04_quick.mp3' )
             if not success:
                 # something went wronger... just forget the whole thing,
                 self.audioMethod = None
@@ -108,12 +107,14 @@ class LlamaAudio():
         if not self.enabled:
             return False
 
+        fullpath = '{}{}'.format( self.soundsdir, fname )
+
         if self.audioMethod == 'playsound':
-            playsound( fname, False )
+            playsound( fullpath, False )
 
         elif self.audioMethod == 'mpg123':
             try:
-                aproc = subprocess.Popen( [ 'mpg123', fname ],
+                aproc = subprocess.Popen( [ 'mpg123', fullpath ],
                     True, # background.
                     close_fds=True,  # suppress all output
                     stdout=subprocess.DEVNULL,
@@ -128,6 +129,23 @@ class LlamaAudio():
 
         return True
 
+
+
+class LLPrintout() :
+    def __init__():
+        self.type = "text"  # or graphic
+
+
+    def TearOff( self, filename ):
+        """ tear off a page. this ceases the previous page and starts a new one """
+        return
+
+
+    def LF( self ):
+        return
+
+    def CR( self ):
+        return
 
 class IWProtocolHandler( serial.threaded.Protocol ):
     """serial/file to file/outputs/etc"""
@@ -146,10 +164,8 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
         self.serialport = None
 
-        self.file = None
+        self.rawFile = None
         self.fSize = 0
-
-        self.Printouts = "Printouts/"
 
         # esc - escaped 
         self.escRemaining = 0        # number of chars left in escape sequence
@@ -168,37 +184,16 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
                 0x26,   # mousetext remap
                 0x24,   # ascii
-
-                0x2d,   # user designed characters
-                0x2b,
-                0x49,
-                0x27,
-                0x2a,
-                0x24,
-
-                0x6e,   # character pitch
-                0x4e,
-                0x45,
-                0x65,
-                0x71,
-                0x51,
-                0x70,
-                0x50,
-
-                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, # dot spacings
-
-                0x58,   # text attributes
-                0x59,
-                0x21,
-                0x22,
-                0x77,
-                0x57,
-                0x78,
-                0x79,
-                0x7a,
-
-                0x3e,   # head motion
-                0x3c,
+                # user designed characters
+                0x2d, 0x2b, 0x49, 0x27, 0x2a, 0x24,
+                # character pitch
+                0x6e, 0x4e, 0x45, 0x65, 0x71, 0x51, 0x70, 0x50,
+                # dot spacings
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 
+                # text attributes
+                0x58, 0x59, 0x21, 0x22, 0x77, 0x57, 0x78, 0x79, 0x7a,
+                # head motion
+                0x3e, 0x3c,
 
                 0x30,   # clear all tabs
 
@@ -270,6 +265,8 @@ class IWProtocolHandler( serial.threaded.Protocol ):
         # IWII Technical Reference Manual on page 134-135
         # (PDF page 153-154)
         self.state = { 
+            "select"      : True,
+
             "language"      : "American",
                 # Italian, Danish, British, German, Swedish, French, Spanish
 
@@ -332,9 +329,10 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             "subscript"     : False,
         };
 
+
     def PowerDown( self ):
         """ do all of the necessfary junk for pilot on the burner """
-        self.CloseFile();
+        self.CloseRawFile();
 
     def GetSeqLen( self, firstByte ):
         """ Go through the table above, and find the matching opcode.
@@ -349,54 +347,59 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
         return 0
 
-    def GetNewFilename( self ):
+    def GetNewFilename( self, basepath, extension ):
         """ determine the next filename to use """
         i = 0
 
         # get the integer based on sequential digits
-        #if not os.path.isdir( "Printouts" ):
-        #    os.makedirs( "Printouts" )
+        if not os.path.isdir( basepath ):
+            os.makedirs( basepath )
+
         # get the integer based on current time
         i = time.time()
 
-        while os.path.exists( "Printouts/%04d.raw" % i ):
+        while os.path.exists( "%s%04d.%s" % (basepath, i, extension) ):
             i += 1
 
-        return "Printouts/%04d.raw" % i;
+        return "%s%04d.%s" % (basepath, i, extension);
 
-    def CloseFile( self, renameTo = None ):
+    def CloseRawFile( self, renameTo = None ):
         """ close the open file, if any """
-        if self.file == None:
+        if self.rawFile == None:
             return; # nothing to do
 
-        self.file.close()
+        self.rawFile.close()
         print( "{}: Ended.  {} bytes stored.".format( self.currentFilename, self.fSize ))
 
         if self.fSize == 0:
-            print( "Removing empty file." )
+            print( "Not keeping empty file." )
             os.remove( self.currentFilename )
 
         else:
+            # if no filename was passed in, pick a new name. 
+            if renameTo == None or len( renameTo ) == 0:
+                # generate a new one (has directory name on it)
+                nfn = self.GetNewFilename( config[ 'printdir' ], 'raw' )
+            else:
+                # prepend the directory name
+                nfn = '{}{}'.format( config[ 'printdir' ], renameTo )
 
-            # if a filename was passed in, rename the saved file 
-            if not renameTo == None and len( renameTo ) > 0:
-                nfn = "Printouts/{}".format( renameTo )
-                os.rename( self.currentFilename, nfn )
-                print( "--> renamed to {}".format( nfn ))
+            os.rename( self.currentFilename, nfn )
+            print( "--> renamed to {}".format( nfn ))
 
-    def OpenFile( self ):
+    def OpenRawFile( self ):
         """ open a new file for logging """
-        self.currentFilename = self.GetNewFilename()
+        self.currentFilename = '{}CURRENT.raw'.format( config[ 'printdir' ] )
 
         print("\n{}: Starting new page".format( self.currentFilename ))
-        self.file = open( self.currentFilename, "wb" ) 
+        self.rawFile = open( self.currentFilename, "wb" ) 
 
 
 
     def TearOffPage( self, renameFilename = None ):
         """ tear off the existing page, and start a new one """
-        self.CloseFile( renameFilename );
-        self.OpenFile();
+        self.CloseRawFile( renameFilename );
+        self.OpenRawFile();
 
         if self.tick == 0:
             self.FlushLine()
@@ -420,7 +423,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             print( "    {:>2}: {}".format( i, theList[i] ))
 
     def Reprint( self, request, logging ):
-        theList = self.DirList( self.Printouts, ".raw" )
+        theList = self.DirList( config[ 'printdir' ], ".raw" )
 
         if( request == '' ):
             print( "No printout chosen.  Usage: r <number>" )
@@ -438,7 +441,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             print( "ERROR: {}: Out of range 0..{}".format( request, len( theList )-1))
             return
 
-        rFilename = "{}{}".format( self.Printouts, theList[ request ] )
+        rFilename = "{}{}".format( config[ 'printdir' ], theList[ request ] )
         print( "--- Reprinting {} ---".format( rFilename ))
 
         file = open( rFilename, "rb" )
@@ -493,31 +496,40 @@ class IWProtocolHandler( serial.threaded.Protocol ):
         otherwise return false
         """
         if ch == 0x04:
-            print( "[EOT]" ) # End loading new character bitmaps
+            self.CmdPrint( "^EOT/end new glyphs" ) # End loading new character bitmaps
 
-        elif ch == 0x08:
-            print( "[BS]" ) # backspace
+        elif ch == 0x08: # IW1, IW2
+            self.CmdPrint( "^BS" ) # backspace
+            # this moves the cursor back 1 character and overstrikes.
         elif ch == 0x09:
-            print( "[TAB]" ) # tab
+            self.CmdPrint( "^TAB" ) # tab
 
         elif ch == 0x0a:
-            print( "[LF]" ) # feed paper one line (LF)
+            self.CmdPrint( "^LF/1 line" ) # feed paper one line (LF)
         elif ch == 0x0c:
-            print( "[FF]" ) # Feed to next Top of page 
+            self.CmdPrint( "^FF/To TOP" ) # Feed to next Top of page 
         elif ch == 0x0d:
-            print( "[CR]" ) # Carriage Return
+            self.CmdPrint( "^CR" ) # Carriage Return
 
-        elif ch == 0x0e:
-            print( "[DW]" ) # Start double-width printing
-        elif ch == 0x0f:
-            print( "[SDW]" ) # Stop double-width printing
+        elif ch == 0x0e: # IW1, IW2
+            # Start double-width printing
+            # IW1 manual calls this "headline type"
+            self.CmdPrint( "^Start Double Width" ) 
+            self.StateChange( 'doublewidth', True )
+        elif ch == 0x0f: # IW1, IW2
+            # Stop double-width printing
+            self.CmdPrint( "^Stop Double Width" )
+            self.StateChange( 'doublewidth', False )
 
         elif ch == 0x11:
-            print( "[XON]" ) # Select Printer * 
+            self.CmdPrint( "^XON/Select" ) # Select Printer * 
+            self.StateChange( 'select', True )
         elif ch == 0x13:
-            print( "[XOFF]" ) # Deselect Printer
+            self.CmdPrint( "^XOFF/Deselect" ) # Deselect Printer
+            self.StateChange( 'select', False )
+
         elif ch == 0x18:
-            print( "[CAN]" ) # cancel / Erase current l ine from print buffer
+            self.CmdPrint( "^CANcel line" ) # cancel / Erase current l ine from print buffer
 
         else:
             return False
@@ -534,14 +546,18 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
     def CmdPrint( self, txt ):
         """ debug text to show when we get an inline command """
-        self.SerResponse( '<{}>'.format( txt ) );
+        sys.stdout.write( "<{}>\n".format( txt ) );
 
+    def StateChange( self, field, value ):
+        """ called whenever display changes are made on the state"""
+        self.state[ field ] = value;
+        return
 
     def HandleEscapeSequence( self, seq ):
         """ When the code gets to here, we have a completed escape sequence. """
 
         # [0] is the base command. [1]..[5] are arguments.
-        if( seq[0] == 0x63 ):   
+        if( seq[0] == 0x63 ): # IW1, IW2
             self.CmdPrint( "Reset Defaults" )
             self.ResetState()
 
@@ -557,72 +573,156 @@ class IWProtocolHandler( serial.threaded.Protocol ):
                 self.SerResponse( "IW10C" ) 
                 # not sure if \n or \r are needed for this. need to test.
 
-        elif( seq[0] >= 0x01 and seq[0] <= 0x06 ):
-            self.CmdPrint( "Insert {} dot spaces".format( seq[0]) )
+        elif( seq[0] == 0x24 ):
+            self.CmdPrint( "Switch to Standard ASCII characters *" )
+            self.StateChange( 'charset', 'ASCII' )
+        elif( seq[0] == 0x26 ):
+            self.CmdPrint( "Remap MouseText To Low Ascii" )
+            self.StateChange( 'charset', 'MouseText' )
 
-        elif( seq[0] == 0x24 ):   self.CmdPrint( "Switch to Standard ASCII characters *" )
-        elif( seq[0] == 0x26 ):   self.CmdPrint( "Remap MouseText To Low Ascii" )
         elif( seq[0] == 0x27 ):   self.CmdPrint( "Switch to custom character font" )
         elif( seq[0] == 0x2a ):   self.CmdPrint( "Switch to custom character font (high vals)" )
         elif( seq[0] == 0x2b ):   self.CmdPrint( "Max width of custom chars: 16 dots")
         elif( seq[0] == 0x2d ):   self.CmdPrint( "Max width of custom chars: 8 dots *" )
         
-        elif( seq[0] == 0x58 ):   self.CmdPrint( "Start Underline" )
-        elif( seq[0] == 0x59 ):   self.CmdPrint( "Stop Underline *" )
-        elif( seq[0] == 0x21 ):   self.CmdPrint( "Start Bold" )
-        elif( seq[0] == 0x22 ):   self.CmdPrint( "Stop Bold *" )
+        elif( seq[0] == 0x58 ): # IW1, IW2
+            self.CmdPrint( "Start Underline" )
+            self.StateChange( 'underline', True )
+        elif( seq[0] == 0x59 ): # IW1, IW2
+            self.CmdPrint( "Stop Underline *" )
+            self.StateChange( 'underline', False )
+        elif( seq[0] == 0x21 ): # IW1, IW2
+            self.CmdPrint( "Start Bold" )
+            self.StateChange( 'bold', True )
+        elif( seq[0] == 0x22 ): # IW1, IW2
+            self.CmdPrint( "Stop Bold *" )
+            self.StateChange( 'bold', False )
+        elif( seq[0] == 0x77 ):
+            self.CmdPrint( "Start Half-Height" )
+            self.StateChange( 'halfheight', True )
+        elif( seq[0] == 0x57 ):
+            self.CmdPrint( "Stop Half-Height *" )
+            self.StateChange( 'halfheight', False )
+        
+        elif( seq[0] == 0x78 ):
+            self.CmdPrint( "Start Superscript" )
+            self.StateChange( 'superscript', True )
+            self.StateChange( 'subscript', False )
+        elif( seq[0] == 0x79 ):
+            self.CmdPrint( "Start Subscript" )
+            self.StateChange( 'superscript', False )
+            self.StateChange( 'subscript', True )
+        elif( seq[0] == 0x7a ):
+            self.CmdPrint( "Stop Super/Subscript *" )
+            self.StateChange( 'superscript', False )
+            self.StateChange( 'subscript', False )
+        
 
-        elif( seq[0] == 0x77 ):   self.CmdPrint( "Start Half-Height" )
-        elif( seq[0] == 0x57 ):   self.CmdPrint( "Stop Half-Height *" )
+        elif( seq[0] == 0x6e ): # IW1, IW2
+            # 9 cpi, 72dpi, 576 dots per 8" line
+            self.CmdPrint( "9 cpi - extended" )
+            self.StateChange( 'pitch', 9 )
+        elif( seq[0] == 0x4e ): # IW1, IW2
+            # 10 cpi, 80 dpi, 640
+            self.CmdPrint( "10 cpi - pica" )
+            self.StateChange( 'pitch', 10 )
+        elif( seq[0] == 0x45 ): # IW1, IW2
+            # 12 cpi, 96 dpi, 768 ** default for IW1
+            self.CmdPrint( "12 cpi - elite" )
+            self.StateChange( 'pitch', 12 )
+        elif( seq[0] == 0x70 ): # IW1, IW2
+            # 144 dpi, 1152
+            self.CmdPrint( "144 dpi - pica proportional" )
+            self.StateChange( 'pitch', 144 )
+        elif( seq[0] == 0x50 ): # IW1, IW2
+            # 160 dpi, 1280
+            self.CmdPrint( "160 dpi - elite proportional" )
+            self.StateChange( 'pitch', 160 )
+        elif( seq[0] == 0x65 ): # IW1, IW2
+            # 13.4 cpi, 107 dpi, 856
+            self.CmdPrint( "13.4 cpi - semicondensed" )
+            self.StateChange( 'pitch', 13.4 )
+        elif( seq[0] == 0x71 ): # IW1, IW2
+            # 15 cpi, 120 dpi, 960
+            self.CmdPrint( "15 cpi - condensed" )
+            self.StateChange( 'pitch', 15 )
+        elif( seq[0] == 0x51 ): # IW1, IW2
+            # 17 cpi, 136 dpi, 1088
+            self.CmdPrint( "17 cpi - ultracondensed" )
+            self.StateChange( 'pitch', 17 )
         
-        elif( seq[0] == 0x78 ):   self.CmdPrint( "Start Superscript" )
-        elif( seq[0] == 0x79 ):   self.CmdPrint( "Start Subscript" )
-        elif( seq[0] == 0x7a ):   self.CmdPrint( "Stop Super/Subscript *" )
         
+        elif( seq[0] == 0x41 ): # IW1, IW2
+            self.CmdPrint( "6 lines per inch *" )
+            self.StateChange( 'pitch', 160 )
+        elif( seq[0] == 0x42 ): # IW1, IW2
+            self.CmdPrint( "8 lines per inch" )
+            self.StateChange( 'pitch', 160 )
+        elif( seq[0] == 0x54 ): # IW1, IW2
+            self.CmdPrint( "Distance between lines" )
+            # set to NN/144 of an inch
+            # <ESC>T16 to advance 1 char height down
+            self.StateChange( 'dpl', 99 )
+        
+        elif( seq[0] == 0x66 ): # IW1, IW2
+            self.CmdPrint( "Forward line feeding *" )
+            self.StateChange( 'linefeeding', 'forward' )
+        elif( seq[0] == 0x72 ): # IW1, IW2
+            self.CmdPrint( "Reverse line feeding" )
+            self.StateChange( 'linefeeding', 'reverse' )
+        elif( seq[0] >= 0x31 and seq[0] < 0x3f ):
+            self.CmdPrint( "Feed {} lines blank paper".format( seq[0] - 0x30 ))
 
-        elif( seq[0] == 0x6e ):   self.CmdPrint( "9 cpi - extended" )
-        elif( seq[0] == 0x4e ):   self.CmdPrint( "10 cpi - pica" )
-        elif( seq[0] == 0x45 ):   self.CmdPrint( "12 cpi - elite" )
-        elif( seq[0] == 0x65 ):   self.CmdPrint( "13.4 cpi - semicondensed" )
-        elif( seq[0] == 0x71 ):   self.CmdPrint( "15 cpi - condensed" )
-        elif( seq[0] == 0x51 ):   self.CmdPrint( "17 cpi - ultracondensed" )
+        elif( seq[0] == 0x76 ): # IW1, IW2
+            self.CmdPrint( "Set TOF to current pos" )
         
-        elif( seq[0] == 0x70 ):   self.CmdPrint( "144 dpi - pica proportional" )
-        elif( seq[0] == 0x50 ):   self.CmdPrint( "160 cpi - elite proportional" )
+        elif( seq[0] == 0x3e ): # IW1, IW2
+            self.CmdPrint( "Left-to-right printing" )
+            self.StateChange( 'printdirection', 'left-to-right' )
+        elif( seq[0] == 0x3c ): # IW1, IW2
+            self.CmdPrint( "Bidirectional printing *" )
+            self.StateChange( 'printdirection', 'bidirectional' )
         
-        elif( seq[0] == 0x41 ):   self.CmdPrint( "6 lines per inch *" )
-        elif( seq[0] == 0x42 ):   self.CmdPrint( "8 lines per inch" )
-        elif( seq[0] == 0x54 ):   self.CmdPrint( "Distance between lines" )
-        
-        elif( seq[0] == 0x66 ):   self.CmdPrint( "Forward line feeding *" )
-        elif( seq[0] == 0x72 ):   self.CmdPrint( "Reverse line feeding" )
-        elif( seq[0] == 0x76 ):   self.CmdPrint( "Set TOF to current pos" )
-        
-        elif( seq[0] == 0x3e ):   self.CmdPrint( "Unidirectional printing" )
-        elif( seq[0] == 0x3c ):   self.CmdPrint( "Bidirectional printing *" )
-        
-        elif( seq[0] == 0x4f ):   self.CmdPrint( "Paper out sensor off" )
-        elif( seq[0] == 0x6f ):   self.CmdPrint( "Paper out sensor on *" )
+        elif( seq[0] == 0x4f ):  # IW1, IW2
+            self.CmdPrint( "Paper out sensor off" )
+            self.StateChange( 'paperoutsens', False )
+        elif( seq[0] == 0x6f ):  # IW1, IW2
+            self.CmdPrint( "Paper out sensor on *" )
+            self.StateChange( 'paperoutsens', True )
 
-        elif( seq[0] == 0x28 ):   self.CmdPrint( "Set Tabstops" )
-        elif( seq[0] == 0x75 ):   self.CmdPrint( "Set One Tabstop" )
-        elif( seq[0] == 0x29 ):   self.CmdPrint( "Clear Tabstops" )
-        elif( seq[0] == 0x30 ):   self.CmdPrint( "Clear All Tabs" )
+        elif( seq[0] == 0x28 ):
+            self.CmdPrint( "Set Tabstops" )
+        elif( seq[0] == 0x75 ):
+            self.CmdPrint( "Set One Tabstop" )
+        elif( seq[0] == 0x29 ):
+            self.CmdPrint( "Clear Tabstops" )
+        elif( seq[0] == 0x30 ):
+            self.CmdPrint( "Clear All Tabs" )
 
-        elif( seq[0] == 0x6c ):
-            if( seq[1] == 0x30 ):
+        elif( seq[0] == 0x6c ): # IW1, IW2
+            if( seq[1] == 0x30 ): # IW1, IW2
                 self.CmdPrint( "Insert CR before LF and FF *" )
-            elif( seq[1] == 0x31 ): 
+                self.StateChange( 'insCRbeforeLF', True )
+            elif( seq[1] == 0x31 ): # IW1, IW2
                 self.CmdPrint( "No CR before LF and FF" )
+                self.StateChange( 'insCRbeforeLF', False )
 
         elif( seq[0] == 0x49 ):
             self.CmdPrint( "Start Load custom characters" )
             # ends with 0x04
 
+        elif( seq[0] == 0x73 ):
+            # dot spacing between each character in proportional modes
+            # 0..9
+            self.CmdPrint( "Set dot spacing to {}".format( seq[1] ))
+
+        elif( seq[0] >= 0x01 and seq[0] <= 0x06 ):
+            # add n dots of space between characters 
+            # "Elite proportional only" - IW1 manual
+            self.CmdPrint( "Insert {} dot spaces".format( seq[0]) )
+
         elif( seq[0] == 0x46 ):
             self.CmdPrint( "Place Print Head from left margin" )
-        elif( seq[0] == 0x73 ):
-            self.CmdPrint( "Set dot spacing to {}".format( seq[1] ))
         elif( seq[0] == 0x47 ):
             self.CmdPrint( "Print a line of graphics" )
         elif( seq[0] == 0x53 ):
@@ -633,54 +733,85 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             self.CmdPrint( "Print repetitions of dots" )
         
         elif( seq[0] == 0x52 ):
+            # eg <esc>R024*  repeats '*' 24 times
+            #  leading zeros may be replaced with spaces.
             self.CmdPrint( "Repeat character N times" )
         
         elif( seq[0] == 0x61 ):
             if( seq[1] == 0x30 ):
                 self.CmdPrint( "FONT: Correspondence" )
+                self.StateChange( 'font', 'correspondence' )
             elif( seq[1] == 0x31 ):
                 self.CmdPrint( "FONT: Draft *" )
+                self.StateChange( 'font', 'draft' )
             elif( seq[1] ==  0x32 ):
                 self.CmdPrint( "FONT: NLQ" )
+                self.StateChange( 'font', 'nlq' )
         elif( seq[0] == 0x6d ):
             self.CmdPrint( "FONT: Correspondence" )
+            self.StateChange( 'font', 'correspondence' )
         elif( seq[0] == 0x4d ):
             self.CmdPrint( "FONT: Draft *" )
+            self.StateChange( 'font', 'draft' )
 
 
         elif( seq[0] == 0x44 ):
-            if( seq[1] == 0x00 and seq[2] == 0x20 ):
+            if( seq[1] == 0x00 and seq[2] == 0x20 ): 
                 self.CmdPrint( "IGNORE 8th data bit *" )
-            # additional ones will set character sets.
+                self.StateChange( 'bit8', 'ignore' )
+
+            if( seq[1] == 0x01 and seq[2] == 0x00 ): # IW1, IW2
+                self.CmdPrint( "Prints unslashed zeroes" )
+                self.StateChange( 'slashzeroes', False )
+
+            if( seq[1] == 0x80 and seq[2] == 0x00 ): # IW1, IW2
+                self.CmdPrint( "Add automatic LF after CR" )
+                self.StateChange( 'insCRbeforeLF', True )
 
         elif( seq[0] == 0x5A ):
             if( seq[1] == 0x00 and seq[2] == 0x20 ):
                 self.CmdPrint( "INCLUDE 8th data bit" )
+                self.StateChange( 'bit8', 'observe' )
+
+            if( seq[1] == 0x01 and seq[2] == 0x00 ): # IW1, IW2
+                self.CmdPrint( "Prints slashed zeroes" )
+                self.StateChange( 'slashzeroes', True )
+
+            if( seq[1] == 0x80 and seq[2] == 0x00 ): # IW1, IW2
+                self.CmdPrint( "No LF added after CR" )
+                self.StateChange( 'insCRbeforeLF', False )
             # additional ones will set character sets.
 
-        elif( seq[0] == 0x4c ):
+        elif( seq[0] == 0x4c ): # IW1, IW2
+            # sets to # pixels from left
+            # <esc>L035  to 36th character position
             self.CmdPrint( "Set left margin..." )
+
         elif( seq[0] == 0x48 ):
             self.CmdPrint( "Set page length..." )
 
         elif( seq[0] == 0x4b ):
             if( seq[1] == 0x30 ): 
                 self.CmdPrint( "Color: Black *" )
+                self.StateChange( 'color', 'k' )
             elif( seq[1] == 0x31 ): 
                 self.CmdPrint( "Color: Yellow" )
+                self.StateChange( 'color', 'y' )
             elif( seq[1] == 0x32 ): 
                 self.CmdPrint( "Color: Magenta" )
+                self.StateChange( 'color', 'm' )
             elif( seq[1] == 0x33 ): 
                 self.CmdPrint( "Color: Cyan" )
+                self.StateChange( 'color', 'c' )
             elif( seq[1] == 0x34 ): 
                 self.CmdPrint( "Color: Orange (YM)" )
+                self.StateChange( 'color', 'o' )
             elif( seq[1] == 0x35 ): 
                 self.CmdPrint( "Color: Green (YC)" )
+                self.StateChange( 'color', 'g' )
             elif( seq[1] == 0x36 ): 
                 self.CmdPrint( "Color: Purple (MC)" )
-
-        elif( seq[0] >= 0x31 and seq[0] < 0x3f ):
-            self.CmdPrint( "Feed {} lines blank paper".format( seq[0] - 0x30 ))
+                self.StateChange( 'color', 'p' )
 
         else:
             self.CmdPrint( "UNK ESC: {} {} {} {} {} {} \n".format( 
@@ -740,8 +871,8 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             self.HandleByte( ch )
 
         # also log it to the output file
-        if not self.file == None:
-            self.file.write( data )
+        if not self.rawFile == None:
+            self.rawFile.write( data )
             self.fSize += 1
 
 
@@ -792,7 +923,7 @@ class LlamaWriterApp():
             '-s', '--silent',
             action='store_true',
             help='disable audio playback',
-            default=True)
+            default=False)
 
         parser.add_argument(
             '--develop',
@@ -863,8 +994,9 @@ class LlamaWriterApp():
         if not self.args.quiet:
             sys.stderr.write( 
                 '\n'
-                ' >>  Operating in offline mode using "Printouts/" directory\n'
-                ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n' 
+                ' >>  Operating in offline mode using "{}" directory\n'
+                ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n'
+                .format( config[ 'printdir' ] )
                 )
 
 
