@@ -42,8 +42,9 @@ VERS_DATE = '2021-07-22'
 # general application configuration stuff
 config = {
     # general configuration stuff
-    'audio'     : True,              # should we output audio?
-    'printdir'  : 'Printouts/',      # where we store all printouts
+    'audio'         : True,              # should we output audio?
+    'printdir'      : 'Printouts/',      # where we store all printouts
+    'reprintdir'    : 'Reprints/',       # Where all reprint content comes from
 
     # HTML output specific stuff
     'html'      : {
