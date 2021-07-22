@@ -6,9 +6,11 @@
 #
 
 
-VERSION = '0.06'
-VERS_DATE = '2021-07-21'
+VERSION = '1.00'
+VERS_DATE = '2021-07-22'
 
+# v1.00 - 2021-07-22 - Print to html files (most text only)
+#
 # v0.06 - 2021-07-21 - More sounds supported Fleshed out more docs
 # v0.05 - 2021-07-21 - Audio moved to a class, toggleable via cmd line, autoconfigures
 # v0.04 - 2021-07-20 - Reorganization, Initial audio support
@@ -36,14 +38,36 @@ VERS_DATE = '2021-07-21'
 # [  ][ON]  standard
 # [ON][ON]  nlq
 
-
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # general application configuration stuff
 config = {
+    # general configuration stuff
     'audio'     : True,              # should we output audio?
     'printdir'  : 'Printouts/',      # where we store all printouts
-    'soundsdir' : '../Sounds/',      # where the sound files be at
+
+    # HTML output specific stuff
+    'html'      : {
+        'header'    : 'Templates/PageHeader.shtml',
+        'footer'    : 'Templates/PageFooter.shtml',
+        'copyfiles'     : [ 
+            [ 'Templates/llamawriter.css', 'Printouts/llamawriter.css' ],
+        ]
+    },
+
+    # sound/audio specific stuff
+    'sounds'    : {
+        'path'      : '../Sounds/',             # where the sound files be at
+        'test'      : 'power_switch.mp3',       # file used for testing
+        'powerup'   : 'powerup_04_quick.mp3',   # powerup sound
+        'switch'    : 'power_switch.mp3',       # file used for testing
+        'tear'      : 'paper_tear_02.mp3',      # file used for testing
+        'lf'        : 'line_feed_03.mp3',       # linefeed
+        'ff'        : 'page_feed_short.mp3'     # formfeed
+    },
 }
 
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 import sys
 import serial
@@ -60,26 +84,40 @@ from os import listdir
 from os.path import isfile, join
 
 
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
 class LlamaAudio():
 
-    def __init__( self, startupEnabled ):
-        self.audioMethod = None
-        self.soundsdir = config[ 'soundsdir' ]
-        self.enabled = startupEnabled
+    def __init__( self, globalConfig, audioShouldBeEnabled ):
+        self.config = globalConfig
 
-        if startupEnabled:
+        self.audioMethod = None
+        self.enabled = audioShouldBeEnabled
+
+        self.lastPlayed = ''
+
+        # if audio should be enabled, attempt to initialize it
+        # otherwise, it will be disabled.
+        if audioShouldBeEnabled:
             self.AutoConfigure();
 
+    def __call__(self):
+        return self
 
     def AutoConfigure( self ):
-        # attempt to autoconfigure for audio
+        # attempt to autoconfigure which library we're supposed to use.
+        # SET BLASTER=A220 I5 D1 T3
 
         self.audioMethod = None;
+        testFilePath = '{}{}'.format( 
+            self.config[ 'sounds' ][ 'path' ], 
+            self.config[ 'sounds' ][ 'test' ] )
 
         try: 
             # attempt to use playsound library
             from playsound import playsound
-            playsound( '{}/powerup_04_quick.mp3'.format( self.soundsdir ), False ) # should work
+            playsound( testFilePath, True ) # should work
             self.enabled = True
             self.audioMethod = 'playsound'
 
@@ -87,7 +125,7 @@ class LlamaAudio():
             # something went wrong... attempt to use mpg123 via shell
             self.enabled = True
             self.audioMethod = 'mpg123'
-            success = self.Play( 'powerup_04_quick.mp3' )
+            success = self.Play( 'test', andWait=True )
             if not success:
                 # something went wronger... just forget the whole thing,
                 self.audioMethod = None
@@ -100,25 +138,41 @@ class LlamaAudio():
         return self.enabled
 
 
-    def Play( self, fname ):
-        """ Play the specified sound file.
+    def Play( self, soundKey, andWait=False ):
+        """ Play the specified sound file, based on key in the config
             returns False if it was unable to.
             """
         if not self.enabled:
             return False
 
-        fullpath = '{}{}'.format( self.soundsdir, fname )
+        if soundKey == self.lastPlayed:
+            return
+        self.lastPlayed = soundKey
 
+        # build the full path
+        fullpath = '{}{}'.format( 
+            self.config[ 'sounds'][ 'path' ], 
+            self.config[ 'sounds' ][ soundKey ] ) # dereference key
+
+        # attempt to play using the right method
         if self.audioMethod == 'playsound':
-            playsound( fullpath, False )
+            playsound( fullpath, andWait )
 
         elif self.audioMethod == 'mpg123':
             try:
-                aproc = subprocess.Popen( [ 'mpg123', fullpath ],
-                    True, # background.
-                    close_fds=True,  # suppress all output
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL )
+                if andWait:
+                    self.aproc = subprocess.Popen( [ 'mpg123', fullpath ],
+                        False, # background.
+                        close_fds=True,  # suppress all output
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL )
+
+                else:
+                    self.aproc = subprocess.Popen( [ 'mpg123', fullpath ],
+                        True, # background.
+                        close_fds=True,  # suppress all output
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL )
             except: 
                 pass
                 return False
@@ -130,22 +184,170 @@ class LlamaAudio():
         return True
 
 
-
-class LLPrintout() :
-    def __init__():
-        self.type = "text"  # or graphic
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
-    def TearOff( self, filename ):
+class LlamaPrintout() :
+    def __init__( self, globalConfig ):
+        self.config = globalConfig
+
+        self.type = "text"      # current printout type: text / graphic
+        self.buffer = ''        # line buffer for text stuffs.
+        self.state = None       # current printer state
+        self.htmlFile = None    # current html <body> file
+
+        # filename for the current 
+        self.tempFilepath = '{}{}'.format( self.config[ 'printdir' ], 'Current.html' )
+
+        self.StartNewFile()
+
+    def __call__( self ):
+        return self
+
+
+
+    # --- file utilities
+    def AppendToFile( self, src, dest ):
+        buffer_size=1024*32
+
+        try:
+            srcfile = open( src, 'r' ) 
+            dstfile = open( dest, 'a' )
+
+            while True:
+                copy_buffer = srcfile.read(buffer_size)
+                if not copy_buffer:
+                    break
+                dstfile.write(copy_buffer)
+
+            dstfile.close()
+            srcfile.close()
+
+        except Exception as e:
+            print( e )
+            print( "Error appending file {} to {}".format( src, dest ))
+            pass
+
+    def CopyFile( self, src, dest ):
+        try:
+            os.remove( dest )
+        except:
+            pass
+        self.AppendToFile( src, dest )
+
+
+    # --- interaction functionality
+
+    def CloseFile( self, copyTo = None ):
+        """ Close any open files. """
+
+        if copyTo == None or copyTo == '':
+            copyTo = 'Printout_{}'.format( time.time() )
+
+        # if nothing is open, there's nothing to do
+        if self.htmlFile == None:
+            return; # nothing to do
+
+        # save the opened file
+        self.htmlFile.close()
+        self.htmlFile = None
+
+        # now check if it's empty
+        if os.stat( self.tempFilepath ).st_size == 0:
+            # nothing to do
+            # don't need to delete it, since the new one will overwrite it.
+            return
+
+        # now build the destination html file
+        destFilepath = '{}{}.html'.format( self.config[ 'printdir' ], copyTo )
+
+        self.AppendToFile( self.config[ 'html' ][ 'header' ], destFilepath );
+        self.AppendToFile( self.tempFilepath, destFilepath );
+        self.AppendToFile( self.config[ 'html' ][ 'footer' ], destFilepath );
+
+        print( "Your new printout is: ", destFilepath )
+        # and delete the temporary file.
+        os.remove( self.tempFilepath )
+
+        # copy over extra files
+        for fn in self.config[ 'html' ][ 'copyfiles' ]:
+            self.CopyFile( fn[0], fn[1] )
+
+
+    def StartNewFile( self, filename = None ):
+        self.CloseFile( filename )
+        self.htmlFile = open( self.tempFilepath, "wb" );
+        #print( "Opened {} for write".format( self.tempFilepath ) )
+
+
+    def TearOff( self, filename=None ):
         """ tear off a page. this ceases the previous page and starts a new one """
-        return
+        if filename == None:
+            filename = 'Saved_{}'.format( time.time() )
+
+        self.StartNewFile( filename )
 
 
-    def LF( self ):
-        return
+    def CopyState( self, newState ):
+        if self.state == None:
+            self.state = {}
+        for k in newState:
+            self.state[ k ] = newState[ k ]
 
-    def CR( self ):
-        return
+    def UpdateState( self, newState ):
+        #if self.state == None:
+        #    self.state = newState
+        #    return
+
+        stlist = [
+            #'doublewidth', 'halfheight', 
+            'bold', #'italic', 'underline',
+            #'superscript', 'subscript'
+        ]
+
+        for k in stlist:
+            if not self.state[ k ] == newState[ k ]:
+                if newState[ k ] == False:
+                    self.Write( '</span>' )
+                else :
+                    self.Write( '<span class="iw-{}">'.format( k ))
+
+        self.CopyState( newState )
+
+
+    def Control( self, ctrl ):
+        if ctrl == 'CR':
+            self.Write( "<br/>\n" );
+
+        elif ctrl == 'LF':
+            self.Write( "<br/>\n" );
+
+        elif ctrl == 'FF':
+            self.Write( "<br/>\n<hr/>" );
+        elif ctrl == 'TAB':
+            self.Write( "\t" );
+        else:
+            print( '<LLP CTRL {}>'.format( ctrl ))
+
+
+
+    def Write( self, ch ):
+        """ send string or a character to be printed out """
+        if self.htmlFile == None:
+            print( "NO FILE" )
+            return
+
+        if type(ch) == str:
+            self.htmlFile.write( ch.encode() )
+        else:
+            self.htmlFile.write( ch )
+
+        self.htmlFile.flush()
+
+
+
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 class IWProtocolHandler( serial.threaded.Protocol ):
     """serial/file to file/outputs/etc"""
@@ -155,9 +357,13 @@ class IWProtocolHandler( serial.threaded.Protocol ):
     #   When printer buffer space > 100, printer sets DTR True "Ready"
     #   When printer buffer space < 266, printer sends ^S (XOFF)
     #   when printer buffer space > 337, printer sends ^Q (XON)
-    #   - this might be why MacWrite prints fail.
+    #   - this might be why MacWrite prints fail... it expects XONs?
 
-    def __init__(self):
+    def __init__( self, globalConfig ):
+        self.config = globalConfig
+        self.printout = LlamaPrintout( globalConfig )
+        self.audio = None
+
         self.count = 0
         self.tick = 0
         self.rbuf = ""
@@ -260,6 +466,11 @@ class IWProtocolHandler( serial.threaded.Protocol ):
     def __call__(self):
         return self
 
+    def Play( self, audioKey ):
+        if self.audio == None:
+            return
+        self.audio.Play( audioKey )
+
     def ResetState( self ):
         # this is basically copied from Table A-1/A-2 in the 
         # IWII Technical Reference Manual on page 134-135
@@ -329,10 +540,15 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             "subscript"     : False,
         };
 
+        self.printout.CopyState( self.state )
+
 
     def PowerDown( self ):
         """ do all of the necessfary junk for pilot on the burner """
-        self.CloseRawFile();
+        self.Play( 'switch' )
+        self.CloseRawFile()
+        self.printout.TearOff()
+
 
     def GetSeqLen( self, firstByte ):
         """ Go through the table above, and find the matching opcode.
@@ -379,17 +595,17 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             # if no filename was passed in, pick a new name. 
             if renameTo == None or len( renameTo ) == 0:
                 # generate a new one (has directory name on it)
-                nfn = self.GetNewFilename( config[ 'printdir' ], 'raw' )
+                nfn = self.GetNewFilename( self.config[ 'printdir' ], 'raw' )
             else:
                 # prepend the directory name
-                nfn = '{}{}'.format( config[ 'printdir' ], renameTo )
+                nfn = '{}{}'.format( self.config[ 'printdir' ], renameTo )
 
             os.rename( self.currentFilename, nfn )
             print( "--> renamed to {}".format( nfn ))
 
     def OpenRawFile( self ):
         """ open a new file for logging """
-        self.currentFilename = '{}CURRENT.raw'.format( config[ 'printdir' ] )
+        self.currentFilename = '{}CURRENT.raw'.format( self.config[ 'printdir' ] )
 
         print("\n{}: Starting new page".format( self.currentFilename ))
         self.rawFile = open( self.currentFilename, "wb" ) 
@@ -398,13 +614,19 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
     def TearOffPage( self, renameFilename = None ):
         """ tear off the existing page, and start a new one """
-        self.CloseRawFile( renameFilename );
-        self.OpenRawFile();
+        self.CloseRawFile( renameFilename )
+        self.OpenRawFile()
 
-        if self.tick == 0:
+        self.Play( 'tear' )
+
+        self.printout.TearOff( renameFilename )
+
+        if self.tick == 0: # TODO: remove this.
             self.FlushLine()
             self.FlushLine()
         self.tick = 1
+
+
 
     def DirList( self, thePath, theExt ):
         theList = []
@@ -423,7 +645,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             print( "    {:>2}: {}".format( i, theList[i] ))
 
     def Reprint( self, request, logging ):
-        theList = self.DirList( config[ 'printdir' ], ".raw" )
+        theList = self.DirList( self.config[ 'printdir' ], ".raw" )
 
         if( request == '' ):
             print( "No printout chosen.  Usage: r <number>" )
@@ -441,8 +663,9 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             print( "ERROR: {}: Out of range 0..{}".format( request, len( theList )-1))
             return
 
-        rFilename = "{}{}".format( config[ 'printdir' ], theList[ request ] )
+        rFilename = "{}{}".format( self.config[ 'printdir' ], theList[ request ] )
         print( "--- Reprinting {} ---".format( rFilename ))
+
 
         file = open( rFilename, "rb" )
         fbyte = file.read(1)
@@ -462,7 +685,6 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             self.FlushLine()
             self.FlushLine()
         self.tick = 1
-
 
 
     def FlushLine( self ):
@@ -500,22 +722,30 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
         elif ch == 0x08: # IW1, IW2
             self.CmdPrint( "^BS" ) # backspace
+            self.printout.Control( 'BS' )
+
             # this moves the cursor back 1 character and overstrikes.
         elif ch == 0x09:
             self.CmdPrint( "^TAB" ) # tab
+            self.printout.Control( 'TAB' )
 
-        elif ch == 0x0a:
+        elif ch == 0x0d or ch == 0x8d:
+            self.CmdPrint( "^CR" ) # Carriage Return
+            self.printout.Control( 'CR' )
+        elif ch == 0x0a or ch == 0x8a:
             self.CmdPrint( "^LF/1 line" ) # feed paper one line (LF)
+            self.printout.Control( 'LF' )
         elif ch == 0x0c:
             self.CmdPrint( "^FF/To TOP" ) # Feed to next Top of page 
-        elif ch == 0x0d:
-            self.CmdPrint( "^CR" ) # Carriage Return
+            self.printout.Control( 'FF' )
+            self.Play( 'ff' )
 
         elif ch == 0x0e: # IW1, IW2
             # Start double-width printing
             # IW1 manual calls this "headline type"
             self.CmdPrint( "^Start Double Width" ) 
             self.StateChange( 'doublewidth', True )
+
         elif ch == 0x0f: # IW1, IW2
             # Stop double-width printing
             self.CmdPrint( "^Stop Double Width" )
@@ -530,10 +760,11 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
         elif ch == 0x18:
             self.CmdPrint( "^CANcel line" ) # cancel / Erase current l ine from print buffer
-
+            self.printout.Control( 'CANCEL' )
         else:
             return False
 
+        self.printout.UpdateState( self.state )
         return True
 
 
@@ -546,7 +777,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
 
     def CmdPrint( self, txt ):
         """ debug text to show when we get an inline command """
-        sys.stdout.write( "<{}>\n".format( txt ) );
+        #sys.stdout.write( "<{}>\n".format( txt ) );
 
     def StateChange( self, field, value ):
         """ called whenever display changes are made on the state"""
@@ -819,6 +1050,9 @@ class IWProtocolHandler( serial.threaded.Protocol ):
                 self.Hex( seq[2] ), self.Hex( seq[3] ),  
                 self.Hex( seq[4] ), self.Hex( seq[5] ), ))
 
+        self.printout.UpdateState( self.state )
+
+
 
     def HandleByte( self, ch ):
         """ primary valve for the stream of data bytes from the printing computer """
@@ -859,8 +1093,9 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             else:
                 if not self.HandleControlCharacter( ch ):
                     # it's boring content. just output it. or something
-                    sys.stdout.write( chr(ch) )
-                    sys.stdout.flush()
+                    #sys.stdout.write( chr(ch) )
+                    #sys.stdout.flush()
+                    self.printout.Write( chr(ch) )
 
 
     def data_received(self, data):
@@ -876,12 +1111,13 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             self.fSize += 1
 
 
-
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 
 class LlamaWriterApp():
 
-    def __init__(self):
+    def __init__( self, globalConfig ):
+        self.config = globalConfig
 
         print( '## LlamaWriter - An ImageWriterII simulator of sorts.' )
         print( '##    v{} {}'.format( VERSION, VERS_DATE ))
@@ -982,9 +1218,10 @@ class LlamaWriterApp():
 
 
         if not self.args.silent:
-            audio = LlamaAudio( True )
+            self.audio = LlamaAudio( self.config, True )
+            self.audio.Play( 'powerup', True )
         else:
-            audio = LlamaAudio( False )
+            self.audio = LlamaAudio( self.config, False )
 
 
     def StartOffline( self ):
@@ -996,7 +1233,7 @@ class LlamaWriterApp():
                 '\n'
                 ' >>  Operating in offline mode using "{}" directory\n'
                 ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n'
-                .format( config[ 'printdir' ] )
+                .format( self.config[ 'printdir' ] )
                 )
 
 
@@ -1037,6 +1274,7 @@ class LlamaWriterApp():
         # ser_to_net = SerialToNet()
         # serial_worker = serial.threaded.ReaderThread(ser, ser_to_net)
         self.iw_protocol_handler.serialport = serial
+        self.iw_protocol_handler.audio = self.audio
         self.serial_worker.start()
 
 
@@ -1049,13 +1287,14 @@ class LlamaWriterApp():
             try:
                 self.args.SERIALPORT = self.RequestPortOrDirectory()
             except:
-                pass
                 print( "Unable to configure interface." )
                 print( "Exiting." )
+                pass
                 return;
 
         # spin up a protocol handler
-        self.iw_protocol_handler = IWProtocolHandler();
+        self.iw_protocol_handler = IWProtocolHandler( self.config );
+        self.iw_protocol_handler.audio = self.audio
 
         # start either offline (reprint mode) or online (serial mode)
         if os.path.isdir( self.args.SERIALPORT ):
@@ -1171,7 +1410,7 @@ class LlamaWriterApp():
 if __name__ == '__main__': 
 
     # instantiate our application itself
-    llamawriter = LlamaWriterApp()
+    llamawriter = LlamaWriterApp( config )
 
     # parse the command line arguments
     llamawriter.ParseArgs()

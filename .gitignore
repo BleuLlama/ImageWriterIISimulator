@@ -3,4 +3,5 @@ junk.*
 *.junk
 *.swp
 
+src/Printouts/*html
 
