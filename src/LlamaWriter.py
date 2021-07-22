@@ -1245,7 +1245,7 @@ class LlamaWriterApp():
         self.serial_worker = worker
 
         # connect to serial port
-        self.ser = serial.serial_for_url(args.SERIALPORT, do_not_open=True)
+        self.ser = serial.serial_for_url( self.args.SERIALPORT, do_not_open=True)
 
         self.ser.baudrate = self.args.BAUDRATE
         self.ser.bytesize = self.args.bytesize
@@ -1263,7 +1263,7 @@ class LlamaWriterApp():
         if not self.args.quiet:
             sys.stderr.write(
                 ' >>  Operating on {p.name}  {p.baudrate},{p.bytesize},{p.parity},{p.stopbits} ---\n'
-                ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n'.format(p=ser))
+                ' >>  Ctrl-C / BREAK / [q] to quit, [?] for help\n'.format(p=self.ser))
 
         try:
             self.ser.open()
@@ -1273,7 +1273,7 @@ class LlamaWriterApp():
 
         # attach the worker
 
-        self.serial_worker = serial.threaded.ReaderThread( ser, self.iw_protocol_handler )
+        self.serial_worker = serial.threaded.ReaderThread( self.ser, self.iw_protocol_handler )
         # ser_to_net = SerialToNet()
         # serial_worker = serial.threaded.ReaderThread(ser, ser_to_net)
         self.iw_protocol_handler.serialport = serial
