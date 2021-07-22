@@ -198,7 +198,7 @@ class LlamaPrintout() :
         self.htmlFile = None    # current html <body> file
 
         # filename for the current 
-        self.tempFilepath = '{}{}'.format( self.config[ 'printdir' ], 'Current.html' )
+        self.tempFilepath = '{}{}'.format( self.config[ 'printdir' ], '.Current.html' )
 
         self.StartNewFile()
 
@@ -461,7 +461,9 @@ class IWProtocolHandler( serial.threaded.Protocol ):
         #   0x1b 0x28 - set multiple tabstops
         #   0x1b 0x29 - clear multiple tabstops
         # TODO: handlers for this.
-        self.ResetState();
+        self.ResetState()
+
+        self.OpenRawFile()
 
 
     def __call__(self):
@@ -599,14 +601,14 @@ class IWProtocolHandler( serial.threaded.Protocol ):
                 nfn = self.GetNewFilename( self.config[ 'printdir' ], 'raw' )
             else:
                 # prepend the directory name
-                nfn = '{}{}'.format( self.config[ 'printdir' ], renameTo )
+                nfn = '{}{}.raw'.format( self.config[ 'printdir' ], renameTo )
 
             os.rename( self.currentFilename, nfn )
             print( "--> renamed to {}".format( nfn ))
 
     def OpenRawFile( self ):
         """ open a new file for logging """
-        self.currentFilename = '{}CURRENT.raw'.format( self.config[ 'printdir' ] )
+        self.currentFilename = '{}.CURRENT.raw'.format( self.config[ 'printdir' ] )
 
         print("\n{}: Starting new page".format( self.currentFilename ))
         self.rawFile = open( self.currentFilename, "wb" ) 
@@ -646,7 +648,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             print( "    {:>2}: {}".format( i, theList[i] ))
 
     def Reprint( self, request, logging ):
-        theList = self.DirList( self.config[ 'printdir' ], ".raw" )
+        theList = self.DirList( self.config[ 'reprintdir' ], ".raw" )
 
         if( request == '' ):
             print( "No printout chosen.  Usage: r <number>" )
@@ -664,7 +666,7 @@ class IWProtocolHandler( serial.threaded.Protocol ):
             print( "ERROR: {}: Out of range 0..{}".format( request, len( theList )-1))
             return
 
-        rFilename = "{}{}".format( self.config[ 'printdir' ], theList[ request ] )
+        rFilename = "{}{}".format( self.config[ 'reprintdir' ], theList[ request ] )
         print( "--- Reprinting {} ---".format( rFilename ))
 
 
